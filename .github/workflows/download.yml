@@ -7,54 +7,16 @@ on:
         description: 'Torrent file URL or Magnet link'
         required: true
         type: string
-        
       download_path:
         description: 'Download path (default: downloads)'
         required: false
         type: string
         default: 'downloads'
-        
       max_connections:
         description: 'Max connections per torrent'
         required: false
         type: string
         default: '16'
-        
-      file_selection_mode:
-        description: 'File selection mode'
-        required: true
-        type: choice
-        options:
-        - 'Download all files'
-        - 'Select by index (e.g., 1,2,3 or 1-5)'
-        - 'Select by extension (e.g., mkv,srt)'
-        - 'Select by pattern (e.g., 1080p, HEVC)'
-        
-      file_indexes:
-        description: 'File indexes (if using index mode) - e.g., 1,3,5 or 2-4'
-        required: false
-        type: string
-        
-      file_extensions:
-        description: 'File extensions (if using extension mode) - e.g., mkv,srt,mp4'
-        required: false
-        type: string
-        
-      file_pattern:
-        description: 'Pattern to match (if using pattern mode) - e.g., 1080p,HEVC,EAC3'
-        required: false
-        type: string
-        
-      quality_preference:
-        description: 'Quality preference (only for pattern mode)'
-        required: false
-        type: choice
-        options:
-        - 'Any quality'
-        - '4K/2160p'
-        - '1080p'
-        - '720p'
-        - '480p'
 
 jobs:
   download:
@@ -72,66 +34,15 @@ jobs:
     - name: Make scripts executable
       run: chmod +x scripts/*.sh
     
-    - name: Get torrent info
-      id: info
-      run: |
-        chmod +x ./scripts/torrent-info.sh
-        ./scripts/torrent-info.sh "${{ github.event.inputs.torrent_url }}" --json > torrent_info.json
-        cat torrent_info.json
-    
-    - name: Determine file selection
-      id: select
-      run: |
-        MODE="${{ github.event.inputs.file_selection_mode }}"
-        SELECT_FLAG=""
-        
-        if [ "$MODE" = "Select by index (e.g., 1,2,3 or 1-5)" ]; then
-          SELECT_FLAG="${{ github.event.inputs.file_indexes }}"
-        elif [ "$MODE" = "Select by extension (e.g., mkv,srt)" ]; then
-          EXTS=$(echo "${{ github.event.inputs.file_extensions }}" | tr ',' '|')
-          INDEXES=$(jq -r ".files[] | select(.name | test(\"\\\.($EXTS)$\"; \"i\")) | .index" torrent_info.json | paste -sd,)
-          SELECT_FLAG="$INDEXES"
-        elif [ "$MODE" = "Select by pattern (e.g., 1080p, HEVC)" ]; then
-          PATTERN="${{ github.event.inputs.file_pattern }}"
-          QUALITY="${{ github.event.inputs.quality_preference }}"
-          
-          # If quality preference is set, use it as pattern
-          if [ "$QUALITY" != "Any quality" ]; then
-            PATTERN="${QUALITY}${PATTERN:+,$PATTERN}"
-          fi
-          
-          # Convert comma-separated patterns to regex
-          REGEX=$(echo "$PATTERN" | tr ',' '|')
-          INDEXES=$(jq -r ".files[] | select(.name | test(\"($REGEX)\"; \"i\")) | .index" torrent_info.json | paste -sd,)
-          SELECT_FLAG="$INDEXES"
-        fi
-        
-        echo "select_flag=$SELECT_FLAG" >> $GITHUB_OUTPUT
-        echo "Selected indexes: $SELECT_FLAG"
-    
     - name: Create download directory
       run: mkdir -p ${{ github.event.inputs.download_path }}
     
     - name: Download torrent
       run: |
-        START_TIME=$(date +%s)
-        
-        if [ -n "${{ steps.select.outputs.select_flag }}" ]; then
-          ./scripts/download.sh \
-            "${{ github.event.inputs.torrent_url }}" \
-            "${{ github.event.inputs.download_path }}" \
-            "${{ github.event.inputs.max_connections }}" \
-            "${{ steps.select.outputs.select_flag }}"
-        else
-          ./scripts/download.sh \
-            "${{ github.event.inputs.torrent_url }}" \
-            "${{ github.event.inputs.download_path }}" \
-            "${{ github.event.inputs.max_connections }}"
-        fi
-        
-        END_TIME=$(date +%s)
-        DURATION=$((END_TIME - START_TIME))
-        echo "duration=$DURATION" >> $GITHUB_OUTPUT
+        ./scripts/download.sh \
+          "${{ github.event.inputs.torrent_url }}" \
+          "${{ github.event.inputs.download_path }}" \
+          "${{ github.event.inputs.max_connections }}"
       timeout-minutes: 360
     
     - name: Split large files
@@ -145,13 +56,6 @@ jobs:
           "${{ github.event.inputs.download_path }}" \
           "${{ github.repository }}" \
           "${{ github.ref_name }}"
-    
-    - name: Generate summary
-      run: |
-        ./scripts/generate-summary.sh \
-          "${{ github.event.inputs.download_path }}" \
-          "${{ steps.download.outputs.duration }}" \
-          "${{ github.event.inputs.torrent_url }}"
     
     - name: Commit and push files
       run: |
