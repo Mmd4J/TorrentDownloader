@@ -80,13 +80,13 @@ jobs:
           TIMESTAMP="${{ steps.download.outputs.timestamp }}"
           bash scripts/generate_report.sh "$DOWNLOAD_DIR" "$TIMESTAMP" "${{ github.event.inputs.torrent_url }}"
       
-      - name: Update history
+      - name: Update history            
         run: |
-          python3 scripts/update_history.py \
-            --timestamp "${{ steps.download.outputs.timestamp }}" \
-            --torrent "${{ github.event.inputs.torrent_url }}" \
-            --repo "${{ github.repository }}" \
-            --branch "main"
+         bash scripts/update_history.sh \
+           "${{ steps.download.outputs.timestamp }}" \
+           "${{ github.event.inputs.torrent_url }}" \
+           "${{ github.repository }}" \
+           "main"
       
       - name: Commit and push changes
         run: |
