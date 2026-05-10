@@ -1,0 +1,20 @@
+{
+    "original_name": "[Judas] Kono Subarashii Sekai ni Shukufuku wo 3 - OVA 02.mkv",
+    "original_path": "[Judas] Kono Subarashii Sekai ni Shukufuku wo 3 - OVA 02.mkv",
+    "original_size": 246330951,
+    "original_size_mb": 234,
+    "original_hash": "42b38231056d2c6ca740804a9e65ca94dff1c6d996262632cfea9060b776d713",
+    "split_date": "2026-05-10T17:23:34Z",
+    "part_count": 3,
+    "part_size_mb": 95,
+    "compression": "7z",
+    "compression_level": 0,
+    "archive_name": "[Judas] Kono Subarashii Sekai ni Shukufuku wo 3 - OVA 02.mkv.7z",
+    "parts": [
+        {"part": 1, "name": "[Judas] Kono Subarashii Sekai ni Shukufuku wo 3 - OVA 02.mkv.7z.001", "size": 99614720, "hash": "cd79511a389782afb9178b29eee6d6afe36f84a97bcb11c404a946627f8f4e0e"},
+        {"part": 2, "name": "[Judas] Kono Subarashii Sekai ni Shukufuku wo 3 - OVA 02.mkv.7z.002", "size": 99614720, "hash": "0f29234c18306e83cf37c3d989a0f0d56a05298718e6df479d294ee11f0ba52d"},
+        {"part": 3, "name": "[Judas] Kono Subarashii Sekai ni Shukufuku wo 3 - OVA 02.mkv.7z.003", "size": 47101737, "hash": "ee8e5ccc94c76d0c0d8f6be3158ba9472f31665257dbb9f32c6709e45d1173b9"}
+    ],
+    "reassembly_instructions": "Place all parts in the same directory and run: 7z x [Judas] Kono Subarashii Sekai ni Shukufuku wo 3 - OVA 02.mkv.7z.001",
+    "verification": "7z t [Judas] Kono Subarashii Sekai ni Shukufuku wo 3 - OVA 02.mkv.7z.001"
+}
