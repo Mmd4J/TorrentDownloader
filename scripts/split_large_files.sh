@@ -13,10 +13,13 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-MAX_SIZE_MB=95
+MAX_SIZE_MB=${MAX_SIZE_MB:-95}
 MAX_SIZE_BYTES=$((MAX_SIZE_MB * 1024 * 1024))
-SPLIT_SIZE="95M"
+SPLIT_SIZE="${MAX_SIZE_MB}M"
 TARGET_DIR="${1:-downloads}"
+
+# Convert to absolute path
+TARGET_DIR="$(cd "$TARGET_DIR" 2>/dev/null && pwd || echo "$PWD/$TARGET_DIR")"
 SPLIT_DIR="${TARGET_DIR}/.split_files"
 MANIFEST_DIR="${TARGET_DIR}/.manifests"
 
@@ -46,10 +49,22 @@ SKIPPED_FILES=0
 split_file() {
     local file="$1"
     local filename=$(basename "$file")
-    local filename_noext="${filename%.*}"
-    local extension="${filename##*.}"
-    local filesize=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
-    local filesize_mb=$((filesize / 1024 / 1024))
+    local filesize
+    local filesize_mb
+    
+    # Get file size in a portable way
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        filesize=$(stat -f%z "$file" 2>/dev/null || echo 0)
+    else
+        filesize=$(stat -c%s "$file" 2>/dev/null || echo 0)
+    fi
+    
+    if [ "$filesize" -eq 0 ]; then
+        echo -e "  ${YELLOW}⚠${NC} $filename - Empty or inaccessible file, skipping"
+        return 0
+    fi
+    
+    filesize_mb=$((filesize / 1024 / 1024))
     
     # Skip if file is smaller than max size
     if [ "$filesize" -le "$MAX_SIZE_BYTES" ]; then
@@ -60,28 +75,57 @@ split_file() {
     
     echo -e "  ${YELLOW}⚠${NC} $filename (${filesize_mb}MB) - Splitting..."
     
-    # Create a unique directory for this file's parts
-    local file_split_dir="${SPLIT_DIR}/${filename_noext}_parts"
+    # Create a sanitized directory name (replace problematic characters)
+    local safe_name=$(echo "$filename" | sed 's/[^a-zA-Z0-9._-]/_/g')
+    local file_split_dir="${SPLIT_DIR}/${safe_name}_parts"
     mkdir -p "$file_split_dir"
     
     # Create manifest file with original file info
-    local manifest_file="${MANIFEST_DIR}/${filename_noext}.manifest.json"
+    local manifest_file="${MANIFEST_DIR}/${safe_name}.manifest.json"
     
     # Calculate original file hash
     local original_hash=$(sha256sum "$file" | cut -d' ' -f1)
+    
+    # Save current directory
+    local original_dir="$PWD"
+    
+    # Change to the file's directory to avoid path issues with 7z
+    cd "$(dirname "$file")"
+    
+    echo -e "    Working directory: ${BLUE}$PWD${NC}"
+    echo -e "    Splitting file: ${BLUE}$filename${NC}"
+    echo -e "    Output to: ${BLUE}${file_split_dir}${NC}"
     
     # Split the file using 7zip
     # -v${SPLIT_SIZE}: Split into volumes of SPLIT_SIZE
     # -mx0: No compression (faster for already compressed files)
     # -mmt=on: Multithreading
-    cd "$file_split_dir"
+    # The archive name should be just the base name, as 7z will put it in the output dir
+    local archive_name="${filename}.7z"
+    local archive_path="${file_split_dir}/${archive_name}"
     
-    7z a -v${SPLIT_SIZE} -mx0 -mmt=on -t7z "${filename}.7z" "$file"
+    # Create 7z archive with volumes in the split directory
+    7z a -v${SPLIT_SIZE} -mx0 -mmt=on "${archive_path}" "$filename"
+    
+    # Check if split was successful
+    if [ $? -ne 0 ]; then
+        echo -e "    ${RED}✗ Failed to split file${NC}"
+        cd "$original_dir"
+        return 1
+    fi
+    
+    # Go back to original directory
+    cd "$original_dir"
     
     # Count number of parts created
-    local part_count=$(ls -1 "${filename}.7z".* 2>/dev/null | wc -l)
+    local part_count=$(ls -1 "${file_split_dir}/${archive_name}".* 2>/dev/null | wc -l)
     
-    cd - > /dev/null
+    if [ "$part_count" -eq 0 ]; then
+        echo -e "    ${RED}✗ No parts were created${NC}"
+        return 1
+    fi
+    
+    echo -e "    Created ${part_count} parts"
     
     # Create manifest JSON
     cat > "$manifest_file" << EOF
@@ -96,14 +140,22 @@ split_file() {
     "part_size_mb": $MAX_SIZE_MB,
     "compression": "7z",
     "compression_level": 0,
+    "archive_name": "$archive_name",
     "parts": [
 EOF
     
     # Add parts to manifest
     local i=1
-    for part in "$file_split_dir/${filename}.7z".*; do
+    for part in "${file_split_dir}/${archive_name}".*; do
         local part_name=$(basename "$part")
-        local part_size=$(stat -c%s "$part" 2>/dev/null || stat -f%z "$part" 2>/dev/null)
+        local part_size
+        
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            part_size=$(stat -f%z "$part" 2>/dev/null || echo 0)
+        else
+            part_size=$(stat -c%s "$part" 2>/dev/null || echo 0)
+        fi
+        
         local part_hash=$(sha256sum "$part" | cut -d' ' -f1)
         
         if [ $i -lt $part_count ]; then
@@ -117,47 +169,54 @@ EOF
     
     cat >> "$manifest_file" << EOF
     ],
-    "reassembly_command": "7z x ${filename}.7z.001 && mv ${filename}.7z ${filename} && 7z x ${filename}",
-    "verification_command": "cat ${filename}.7z.* > ${filename}.7z && 7z t ${filename}.7z"
+    "reassembly_instructions": "Place all parts in the same directory and run: 7z x ${archive_name}.001",
+    "verification": "7z t ${archive_name}.001"
 }
 EOF
     
-    # Remove original large file after successful split
-    rm -f "$file"
-    
-    echo -e "    ${GREEN}✓${NC} Split into ${part_count} parts"
-    echo -e "    ${BLUE}Manifest:${NC} $manifest_file"
-    echo -e "    ${BLUE}Parts in:${NC} $file_split_dir"
-    
-    SPLIT_FILES=$((SPLIT_FILES + 1))
+    # Verify the split was successful by checking if parts exist and manifest is valid
+    if [ -f "${file_split_dir}/${archive_name}.001" ] && [ -s "$manifest_file" ]; then
+        # Remove original large file after successful split
+        rm -f "$file"
+        echo -e "    ${GREEN}✓ Successfully split and removed original${NC}"
+        echo -e "    ${BLUE}Manifest:${NC} $manifest_file"
+        echo -e "    ${BLUE}Parts in:${NC} $file_split_dir"
+        
+        SPLIT_FILES=$((SPLIT_FILES + 1))
+    else
+        echo -e "    ${RED}✗ Split verification failed, keeping original file${NC}"
+        return 1
+    fi
 }
 
 # Find and process all files in target directory
 echo -e "\n${BLUE}Scanning for large files...${NC}"
 echo ""
 
-while IFS= read -r -d '' file; do
-    # Skip .gitkeep, .split_files directory, and .manifests directory
-    if [[ "$file" == *".gitkeep"* ]] || \
-       [[ "$file" == *".split_files"* ]] || \
-       [[ "$file" == *".manifests"* ]]; then
+# Use find without -print0 for better compatibility
+find "$TARGET_DIR" -type f -not -path "*/.split_files/*" -not -path "*/.manifests/*" -not -name ".gitkeep" | while IFS= read -r file; do
+    
+    # Skip if file is in split_files or manifests directory
+    if [[ "$file" == *"/.split_files/"* ]] || [[ "$file" == *"/.manifests/"* ]]; then
         continue
     fi
     
     TOTAL_FILES=$((TOTAL_FILES + 1))
     split_file "$file"
     
-done < <(find "$TARGET_DIR" -type f -not -path "*/.split_files/*" -not -path "*/.manifests/*" -print0)
+done
 
 # Print summary
 echo ""
 echo -e "${BLUE}=== Summary ===${NC}"
-echo -e "Total files processed: ${YELLOW}$TOTAL_FILES${NC}"
 echo -e "Files split: ${YELLOW}$SPLIT_FILES${NC}"
 echo -e "Files skipped (under ${MAX_SIZE_MB}MB): ${GREEN}$SKIPPED_FILES${NC}"
 
 if [ $SPLIT_FILES -gt 0 ]; then
-    echo -e "\n${YELLOW}⚠ Important: Run 'scripts/merge_files.sh' to reassemble split files locally${NC}"
+    echo -e "\n${YELLOW}⚠ Important:${NC}"
+    echo -e "  Split files are stored in: ${BLUE}${SPLIT_DIR}${NC}"
+    echo -e "  Manifests are stored in: ${BLUE}${MANIFEST_DIR}${NC}"
+    echo -e "  Run ${GREEN}scripts/merge_files.sh${NC} to reassemble files locally"
 fi
 
 echo -e "\n${GREEN}Done!${NC}"
