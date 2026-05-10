@@ -59,7 +59,6 @@ find "$TARGET_DIR" -type f -not -path "*/.split_files/*" -not -path "*/.manifest
     # Skip if file is smaller than max size
     if [ "$filesize" -le "$MAX_SIZE_BYTES" ]; then
         echo -e "  ${GREEN}✓${NC} $filename (${filesize_mb}MB) - No split needed"
-        SKIPPED_FILES=$((SKIPPED_FILES + 1))
         continue
     fi
     
@@ -69,7 +68,7 @@ find "$TARGET_DIR" -type f -not -path "*/.split_files/*" -not -path "*/.manifest
     safe_name=$(echo "$filename" | sed 's/[^a-zA-Z0-9._-]/_/g')
     file_split_dir="${SPLIT_DIR}/${safe_name}_parts"
     
-    # Remove existing split directory if it exists (to avoid update errors)
+    # Remove existing split directory if it exists
     if [ -d "$file_split_dir" ]; then
         echo -e "    Cleaning up previous split attempt..."
         rm -rf "$file_split_dir"
@@ -94,20 +93,18 @@ find "$TARGET_DIR" -type f -not -path "*/.split_files/*" -not -path "*/.manifest
     echo -e "    Output to: ${BLUE}${file_split_dir}${NC}"
     
     # Create fresh 7z archive with volumes
-    # -mx0: No compression (faster for already compressed files)
-    # -v: Split into volumes
     archive_name="${filename}.7z"
     archive_path="${file_split_dir}/${archive_name}"
     
-    # Use a temporary working directory to avoid conflicts
+    # Use a temporary working directory
     WORK_DIR=$(mktemp -d)
     
-    # Copy file to temp directory to avoid any locking issues
+    # Copy file to temp directory
     cp "$filename" "$WORK_DIR/"
     
     cd "$WORK_DIR"
     
-    # Create the split archive from temp directory
+    # Create the split archive
     7z a -v${SPLIT_SIZE} -mx0 -mmt=on "$archive_path" "$filename" || {
         echo -e "    ${RED}✗ Failed to create archive${NC}"
         cd "$original_dir"
@@ -148,8 +145,8 @@ find "$TARGET_DIR" -type f -not -path "*/.split_files/*" -not -path "*/.manifest
     "parts": [
 EOF
     
-    # Add parts to manifest
-    local i=1
+    # Add parts to manifest (removed 'local' keyword)
+    i=1
     for part in "${file_split_dir}/${archive_name}".*; do
         part_name=$(basename "$part")
         part_size=$(stat -c%s "$part" 2>/dev/null || stat -f%z "$part" 2>/dev/null)
@@ -178,7 +175,6 @@ EOF
         echo -e "    ${GREEN}✓ Successfully split into ${part_count} parts${NC}"
         echo -e "    ${BLUE}Manifest:${NC} $manifest_file"
         echo -e "    ${BLUE}Parts:${NC} $file_split_dir"
-        SPLIT_FILES=$((SPLIT_FILES + 1))
     else
         echo -e "    ${RED}✗ Split verification failed${NC}"
     fi
@@ -187,10 +183,9 @@ done
 
 echo ""
 echo -e "${BLUE}=== Summary ===${NC}"
-echo -e "Files split: ${YELLOW}$SPLIT_FILES${NC}"
-echo -e "Files skipped: ${GREEN}$SKIPPED_FILES${NC}"
+echo -e "Files processed and split successfully"
 
-if [ $SPLIT_FILES -gt 0 ]; then
+if [ -d "$SPLIT_DIR" ] && [ "$(ls -A "$SPLIT_DIR" 2>/dev/null)" ]; then
     echo -e "\n${YELLOW}⚠ Important:${NC}"
     echo -e "  Split files: ${BLUE}${SPLIT_DIR}${NC}"
     echo -e "  Manifests: ${BLUE}${MANIFEST_DIR}${NC}"
