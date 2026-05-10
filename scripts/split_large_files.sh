@@ -37,9 +37,6 @@ echo -e "Target directory: ${YELLOW}${TARGET_DIR}${NC}"
 echo -e "Split storage: ${YELLOW}${SPLIT_DIR}${NC}"
 echo "=================================="
 
-SPLIT_FILES=0
-SKIPPED_FILES=0
-
 # Process each file
 find "$TARGET_DIR" -type f -not -path "*/.split_files/*" -not -path "*/.manifests/*" -not -name ".gitkeep" -print0 | while IFS= read -r -d '' file; do
     
@@ -128,6 +125,25 @@ find "$TARGET_DIR" -type f -not -path "*/.split_files/*" -not -path "*/.manifest
     
     echo -e "    Created ${part_count} parts"
     
+    # Build parts JSON
+    PARTS_JSON=""
+    part_num=1
+    for part in "${file_split_dir}/${archive_name}".*; do
+        part_name=$(basename "$part")
+        part_size=$(stat -c%s "$part" 2>/dev/null || stat -f%z "$part" 2>/dev/null)
+        part_hash=$(sha256sum "$part" | cut -d' ' -f1)
+        
+        if [ $part_num -lt $part_count ]; then
+            PARTS_JSON="${PARTS_JSON}        {\"part\": $part_num, \"name\": \"$part_name\", \"size\": $part_size, \"hash\": \"$part_hash\"},
+"
+        else
+            PARTS_JSON="${PARTS_JSON}        {\"part\": $part_num, \"name\": \"$part_name\", \"size\": $part_size, \"hash\": \"$part_hash\"}
+"
+        fi
+        
+        part_num=$((part_num + 1))
+    done
+    
     # Create manifest JSON
     cat > "$manifest_file" << EOF
 {
@@ -143,26 +159,7 @@ find "$TARGET_DIR" -type f -not -path "*/.split_files/*" -not -path "*/.manifest
     "compression_level": 0,
     "archive_name": "$archive_name",
     "parts": [
-EOF
-    
-    # Add parts to manifest (removed 'local' keyword)
-    i=1
-    for part in "${file_split_dir}/${archive_name}".*; do
-        part_name=$(basename "$part")
-        part_size=$(stat -c%s "$part" 2>/dev/null || stat -f%z "$part" 2>/dev/null)
-        part_hash=$(sha256sum "$part" | cut -d' ' -f1)
-        
-        if [ $i -lt $part_count ]; then
-            echo "        {\"part\": $i, \"name\": \"$part_name\", \"size\": $part_size, \"hash\": \"$part_hash\"}," >> "$manifest_file"
-        else
-            echo "        {\"part\": $i, \"name\": \"$part_name\", \"size\": $part_size, \"hash\": \"$part_hash\"}" >> "$manifest_file"
-        fi
-        
-        i=$((i + 1))
-    done
-    
-    cat >> "$manifest_file" << EOF
-    ],
+${PARTS_JSON}    ],
     "reassembly_instructions": "Place all parts in the same directory and run: 7z x ${archive_name}.001",
     "verification": "7z t ${archive_name}.001"
 }
@@ -183,7 +180,7 @@ done
 
 echo ""
 echo -e "${BLUE}=== Summary ===${NC}"
-echo -e "Files processed and split successfully"
+echo -e "Processing complete"
 
 if [ -d "$SPLIT_DIR" ] && [ "$(ls -A "$SPLIT_DIR" 2>/dev/null)" ]; then
     echo -e "\n${YELLOW}⚠ Important:${NC}"
