@@ -4,15 +4,15 @@
     "original_size": 173363300,
     "original_size_mb": 165,
     "original_hash": "f2bd016654b6d4591b4f640312c36e88018b245c088f12e42ad3fbc0816b670f",
-    "split_date": "2026-05-10T17:10:24Z",
+    "split_date": "2026-05-10T20:22:48Z",
     "part_count": 2,
     "part_size_mb": 95,
     "compression": "7z",
     "compression_level": 0,
     "archive_name": "[Trix] Kusuriya no Hitorigoto S02E22 (WEB 1080p AV1 E-AC3) [Multi Subs] [F1A36AF5].mkv.7z",
     "parts": [
-        {"part": 1, "name": "[Trix] Kusuriya no Hitorigoto S02E22 (WEB 1080p AV1 E-AC3) [Multi Subs] [F1A36AF5].mkv.7z.001", "size": 99614720, "hash": "ac5c5c538e38f150f4c66d28fa6b61256cb6280c80e013b02f7c1f353b156aa1"},
-        {"part": 2, "name": "[Trix] Kusuriya no Hitorigoto S02E22 (WEB 1080p AV1 E-AC3) [Multi Subs] [F1A36AF5].mkv.7z.002", "size": 73748862, "hash": "eff394853f995d3bc77f4615fb2b7607926d7ecb2846d7021158a344afb6d1ed"}
+        {"part": 1, "name": "[Trix] Kusuriya no Hitorigoto S02E22 (WEB 1080p AV1 E-AC3) [Multi Subs] [F1A36AF5].mkv.7z.001", "size": 99614720, "hash": "5cde7146f0967fda65f042ed3e177ade9e78ce6df998f746a6062d2deb849644"},
+        {"part": 2, "name": "[Trix] Kusuriya no Hitorigoto S02E22 (WEB 1080p AV1 E-AC3) [Multi Subs] [F1A36AF5].mkv.7z.002", "size": 73748862, "hash": "74ec57e5d8eb9eb071cfe0472e50a6573c9b61113b50353d35c573d6a19d5b98"}
     ],
     "reassembly_instructions": "Place all parts in the same directory and run: 7z x [Trix] Kusuriya no Hitorigoto S02E22 (WEB 1080p AV1 E-AC3) [Multi Subs] [F1A36AF5].mkv.7z.001",
     "verification": "7z t [Trix] Kusuriya no Hitorigoto S02E22 (WEB 1080p AV1 E-AC3) [Multi Subs] [F1A36AF5].mkv.7z.001"
