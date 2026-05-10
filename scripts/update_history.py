@@ -35,19 +35,43 @@ def update_history(timestamp, torrent_url, repo):
     with open(history_file, 'w') as f:
         f.write(content)
 
+def format_timestamp(timestamp):
+    """Convert YYYYMMDD_HHMMSS to readable date string"""
+    try:
+        # Parse the timestamp format: 20260510_204819
+        date_part = timestamp.split('_')[0]  # 20260510
+        time_part = timestamp.split('_')[1]  # 204819
+        
+        year = int(date_part[0:4])
+        month = int(date_part[4:6])
+        day = int(date_part[6:8])
+        hour = int(time_part[0:2])
+        minute = int(time_part[2:4])
+        second = int(time_part[4:6])
+        
+        dt = datetime(year, month, day, hour, minute, second)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except (IndexError, ValueError) as e:
+        print(f"Warning: Could not parse timestamp '{timestamp}': {e}")
+        return timestamp  # Return original if parsing fails
+
 def generate_history_entry(timestamp, torrent_url, repo, manifest):
-    date_str = datetime.fromtimestamp(
-        int(timestamp.split('_')[0][:8] + timestamp.split('_')[1][:6]),
-    ).strftime("%Y-%m-%d %H:%M:%S") if timestamp else "Unknown"
+    date_str = format_timestamp(timestamp)
     
     files_html = ""
     for file in manifest['files']:
         file_path = file['path']
-        download_url = f"https://raw.githubusercontent.com/{repo}/main/downloads/download_{timestamp}/{file_path}"
+        # URL encode the file path for the download link
+        encoded_path = file_path.replace(' ', '%20')
+        download_url = f"https://raw.githubusercontent.com/{repo}/main/downloads/download_{timestamp}/{encoded_path}"
         
+        # Check if it's a split file
+        is_split = '.7z.' in file_path and any(file_path.endswith(f'.{str(i).zfill(3)}') for i in range(1, 1000))
+        
+        file_icon = "📦" if is_split else "📄"
         files_html += f"""
             <div class="file-item">
-                <span class="file-name">📄 {file_path}</span>
+                <span class="file-name">{file_icon} {file_path}</span>
                 <span class="file-size">({file['size_human']})</span>
                 <a href="{download_url}" class="download-link" target="_blank">⬇️ Download</a>
                 <span class="file-hash" title="SHA256: {file['sha256']}">🔒</span>
@@ -58,7 +82,7 @@ def generate_history_entry(timestamp, torrent_url, repo, manifest):
         <div class="history-entry">
             <div class="entry-header">
                 <span class="date">📅 {date_str}</span>
-                <span class="torrent-url">🔗 Torrent/Magnet: {torrent_url[:50]}...</span>
+                <span class="torrent-url">🔗 {torrent_url[:80]}{'...' if len(torrent_url) > 80 else ''}</span>
             </div>
             <div class="entry-files">
                 {files_html}
@@ -88,7 +112,7 @@ def generate_new_history_html(history_entry):
         }}
         
         .container {{
-            max-width: 1000px;
+            max-width: 1200px;
             margin: 0 auto;
             background: white;
             border-radius: 15px;
@@ -123,7 +147,7 @@ def generate_new_history_html(history_entry):
             padding: 20px;
             margin-bottom: 20px;
             border-left: 4px solid #667eea;
-            transition: transform 0.2s;
+            transition: transform 0.2s, box-shadow 0.2s;
         }}
         
         .history-entry:hover {{
@@ -138,51 +162,61 @@ def generate_new_history_html(history_entry):
             padding-bottom: 15px;
             border-bottom: 1px solid #dee2e6;
             margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
         }}
         
         .date {{
             font-weight: bold;
             color: #495057;
+            white-space: nowrap;
         }}
         
         .torrent-url {{
             color: #6c757d;
             font-size: 0.9em;
+            word-break: break-all;
         }}
         
         .file-item {{
             display: flex;
             align-items: center;
-            padding: 10px;
+            padding: 10px 15px;
             background: white;
             border-radius: 5px;
             margin-bottom: 8px;
             gap: 15px;
+            flex-wrap: wrap;
         }}
         
         .file-name {{
             flex: 1;
             font-family: 'Courier New', monospace;
             color: #212529;
+            word-break: break-all;
+            min-width: 200px;
         }}
         
         .file-size {{
             color: #6c757d;
             font-size: 0.9em;
+            white-space: nowrap;
         }}
         
         .download-link {{
             display: inline-block;
-            padding: 5px 15px;
+            padding: 8px 20px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             text-decoration: none;
             border-radius: 5px;
-            transition: transform 0.2s;
+            transition: transform 0.2s, box-shadow 0.2s;
+            white-space: nowrap;
         }}
         
         .download-link:hover {{
             transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
             text-decoration: none;
             color: white;
         }}
@@ -192,16 +226,31 @@ def generate_new_history_html(history_entry):
             font-size: 1.2em;
         }}
         
+        .split-notice {{
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 5px;
+            padding: 10px;
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #856404;
+        }}
+        
         @media (max-width: 768px) {{
             .file-item {{
                 flex-direction: column;
                 align-items: flex-start;
+                gap: 10px;
             }}
             
             .entry-header {{
                 flex-direction: column;
                 align-items: flex-start;
-                gap: 10px;
+            }}
+            
+            .download-link {{
+                width: 100%;
+                text-align: center;
             }}
         }}
     </style>
@@ -220,10 +269,10 @@ def generate_new_history_html(history_entry):
 </html>"""
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--timestamp', required=True)
-    parser.add_argument('--torrent', required=True)
-    parser.add_argument('--repo', required=True)
+    parser = argparse.ArgumentParser(description='Update torrent download history')
+    parser.add_argument('--timestamp', required=True, help='Download timestamp (YYYYMMDD_HHMMSS)')
+    parser.add_argument('--torrent', required=True, help='Torrent URL or magnet link')
+    parser.add_argument('--repo', required=True, help='GitHub repository (owner/repo)')
     
     args = parser.parse_args()
     update_history(args.timestamp, args.torrent, args.repo)
