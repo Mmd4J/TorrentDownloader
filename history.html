@@ -1,1 +1,193 @@
-
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Torrent Download History</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .history-list {
+            padding: 20px;
+        }
+        
+        .history-entry {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .history-entry:hover {
+            transform: translateX(5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .entry-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #dee2e6;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .date {
+            font-weight: bold;
+            color: #495057;
+            white-space: nowrap;
+        }
+        
+        .torrent-url {
+            color: #6c757d;
+            font-size: 0.9em;
+            word-break: break-all;
+        }
+        
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 10px 15px;
+            background: white;
+            border-radius: 5px;
+            margin-bottom: 8px;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .file-name {
+            flex: 1;
+            font-family: 'Courier New', monospace;
+            color: #212529;
+            word-break: break-all;
+            min-width: 200px;
+        }
+        
+        .file-size {
+            color: #6c757d;
+            font-size: 0.9em;
+            white-space: nowrap;
+        }
+        
+        .download-link {
+            display: inline-block;
+            padding: 8px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: transform 0.2s, box-shadow 0.2s;
+            white-space: nowrap;
+        }
+        
+        .download-link:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+            text-decoration: none;
+            color: white;
+        }
+        
+        .file-hash {
+            cursor: help;
+            font-size: 1.2em;
+        }
+        
+        .split-notice {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 5px;
+            padding: 10px;
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #856404;
+        }
+        
+        @media (max-width: 768px) {
+            .file-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+            
+            .entry-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .download-link {
+                width: 100%;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📥 Torrent Download History</h1>
+            <p>All downloads are processed via GitHub Actions with aria2</p>
+        </div>
+        <div class="history-list">
+            
+        <div class="history-entry">
+            <div class="entry-header">
+                <span class="date">📅 2026-05-10 20:56:52</span>
+                <span class="torrent-url">🔗 magnet:?xt=urn:btih:fd92a7dc34ca77c60167d555402b955e77588f9d&dn=The%20Los%20Ange...</span>
+            </div>
+            <div class="entry-files">
+                
+            <div class="file-item">
+                <span class="file-name">📄 The Los Angeles BB Murder Cases by Nisioisin.zip</span>
+                <span class="file-size">(1.2M)</span>
+                <a href="https://raw.githubusercontent.com/KawouT/Torrent/main/downloads/download_20260510_205652/The%20Los%20Angeles%20BB%20Murder%20Cases%20by%20Nisioisin.zip" class="download-link" target="_blank">⬇️ Download</a>
+                <span class="file-hash" title="SHA256: 74b48cca969c1209ee068cb3b05eeed69f00b9f7b7f29121ed0d4524b7395771">🔒</span>
+            </div>
+        
+            </div>
+        </div>
+    
+        </div>
+    </div>
+</body>
+</html>
