@@ -32,6 +32,37 @@ fi
 # Create download directory
 mkdir -p "$DOWNLOAD_PATH"
 
+# Clean up any orphaned aria2 control files and incomplete downloads
+echo -e "${BLUE}Checking for incomplete downloads...${NC}"
+
+# Find and handle problem files
+find "$DOWNLOAD_PATH" -type f -not -name '.gitkeep' -not -path "*/.split_files/*" -not -path "*/.manifests/*" | while read file; do
+    filename=$(basename "$file")
+    dir=$(dirname "$file")
+    aria2_file="${file}.aria2"
+    
+    # Check if file exists without its aria2 control file
+    if [ ! -f "$aria2_file" ]; then
+        # Check if there's a corresponding .aria2 file anywhere
+        if ! find "$DOWNLOAD_PATH" -name "${filename}.aria2" | grep -q .; then
+            echo -e "  ${YELLOW}Found incomplete file (no control file): ${filename}${NC}"
+            echo -e "  ${YELLOW}Removing to allow clean download...${NC}"
+            rm -f "$file"
+        fi
+    fi
+done
+
+# Also clean up orphaned .aria2 files without their main file
+find "$DOWNLOAD_PATH" -name "*.aria2" | while read aria2_file; do
+    main_file="${aria2_file%.aria2}"
+    if [ ! -f "$main_file" ]; then
+        echo -e "  ${YELLOW}Removing orphaned control file: $(basename "$aria2_file")${NC}"
+        rm -f "$aria2_file"
+    fi
+done
+
+echo -e "${GREEN}✓ Cleanup complete${NC}"
+
 echo -e "${GREEN}=== Aria2 Torrent Downloader ===${NC}"
 echo -e "URL: ${YELLOW}${TORRENT_URL:0:100}...${NC}"
 echo -e "Download Path: ${YELLOW}$DOWNLOAD_PATH${NC}"
@@ -39,12 +70,15 @@ echo -e "Max Connections: ${YELLOW}$MAX_CONNECTIONS${NC}"
 echo "=================================="
 
 # Download with aria2
+# Added --allow-overwrite=true and --auto-file-renaming=false for robustness
 aria2c \
     --dir="$DOWNLOAD_PATH" \
     --max-connection-per-server="$MAX_CONNECTIONS" \
     --split="$MAX_CONNECTIONS" \
     --min-split-size=1M \
     --continue=true \
+    --allow-overwrite=true \
+    --auto-file-renaming=false \
     --seed-time=0 \
     --seed-ratio=0.0 \
     --bt-max-peers=100 \
@@ -55,7 +89,9 @@ aria2c \
     --summary-interval=10 \
     "$TORRENT_URL"
 
-if [ $? -eq 0 ]; then
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -eq 0 ]; then
     echo -e "\n${GREEN}=== Download Completed Successfully ===${NC}"
     
     # Display downloaded files
@@ -66,6 +102,7 @@ if [ $? -eq 0 ]; then
     TOTAL_SIZE=$(du -sh "$DOWNLOAD_PATH" --exclude=.split_files --exclude=.manifests 2>/dev/null | cut -f1)
     echo -e "\n${YELLOW}Total download size: ${GREEN}$TOTAL_SIZE${NC}"
 else
-    echo -e "\n${RED}=== Download Failed ===${NC}"
-    exit 1
+    echo -e "\n${RED}=== Download Failed (Exit code: $EXIT_CODE) ===${NC}"
+    echo -e "${YELLOW}Tip: If the error is about existing files, try running again to resume.${NC}"
+    exit $EXIT_CODE
 fi
