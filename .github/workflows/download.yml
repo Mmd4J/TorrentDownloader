@@ -92,10 +92,10 @@ jobs:
       
       - name: Update history
         run: |
-          python3 scripts/update_history.py \
-            --timestamp "${{ steps.download.outputs.timestamp }}" \
-            --torrent "${{ github.event.inputs.torrent_url }}" \
-            --repo "${{ github.repository }}"
+         python3 scripts/update_history.py \
+           --timestamp "${{ steps.download.outputs.timestamp }}" \
+           --torrent "${{ github.event.inputs.torrent_url }}" \
+           --repo "${{ github.repository }}"
       
       - name: Commit and push changes
         run: |
