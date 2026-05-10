@@ -1,4 +1,4 @@
-name: Torrent Downloader with Auto-Split
+name: Torrent Downloader
 
 on:
   workflow_dispatch:
@@ -7,24 +7,57 @@ on:
         description: 'Torrent file URL or Magnet link'
         required: true
         type: string
+        
       download_path:
         description: 'Download path (default: downloads)'
         required: false
         type: string
         default: 'downloads'
+        
       max_connections:
         description: 'Max connections per torrent'
         required: false
         type: string
         default: '16'
-      max_file_size_mb:
-        description: 'Max file size before splitting (MB)'
+        
+      file_selection_mode:
+        description: 'File selection mode'
+        required: true
+        type: choice
+        options:
+        - 'Download all files'
+        - 'Select by index (e.g., 1,2,3 or 1-5)'
+        - 'Select by extension (e.g., mkv,srt)'
+        - 'Select by pattern (e.g., 1080p, HEVC)'
+        
+      file_indexes:
+        description: 'File indexes (if using index mode) - e.g., 1,3,5 or 2-4'
         required: false
         type: string
-        default: '95'
+        
+      file_extensions:
+        description: 'File extensions (if using extension mode) - e.g., mkv,srt,mp4'
+        required: false
+        type: string
+        
+      file_pattern:
+        description: 'Pattern to match (if using pattern mode) - e.g., 1080p,HEVC,EAC3'
+        required: false
+        type: string
+        
+      quality_preference:
+        description: 'Quality preference (only for pattern mode)'
+        required: false
+        type: choice
+        options:
+        - 'Any quality'
+        - '4K/2160p'
+        - '1080p'
+        - '720p'
+        - '480p'
 
 jobs:
-  download-and-split:
+  download:
     runs-on: ubuntu-latest
     
     steps:
@@ -34,72 +67,98 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y aria2 p7zip-full
+        sudo apt-get install -y aria2 p7zip-full jq
     
     - name: Make scripts executable
+      run: chmod +x scripts/*.sh
+    
+    - name: Get torrent info
+      id: info
       run: |
-        chmod +x scripts/*.sh
+        chmod +x ./scripts/torrent-info.sh
+        ./scripts/torrent-info.sh "${{ github.event.inputs.torrent_url }}" --json > torrent_info.json
+        cat torrent_info.json
+    
+    - name: Determine file selection
+      id: select
+      run: |
+        MODE="${{ github.event.inputs.file_selection_mode }}"
+        SELECT_FLAG=""
+        
+        if [ "$MODE" = "Select by index (e.g., 1,2,3 or 1-5)" ]; then
+          SELECT_FLAG="${{ github.event.inputs.file_indexes }}"
+        elif [ "$MODE" = "Select by extension (e.g., mkv,srt)" ]; then
+          EXTS=$(echo "${{ github.event.inputs.file_extensions }}" | tr ',' '|')
+          INDEXES=$(jq -r ".files[] | select(.name | test(\"\\\.($EXTS)$\"; \"i\")) | .index" torrent_info.json | paste -sd,)
+          SELECT_FLAG="$INDEXES"
+        elif [ "$MODE" = "Select by pattern (e.g., 1080p, HEVC)" ]; then
+          PATTERN="${{ github.event.inputs.file_pattern }}"
+          QUALITY="${{ github.event.inputs.quality_preference }}"
+          
+          # If quality preference is set, use it as pattern
+          if [ "$QUALITY" != "Any quality" ]; then
+            PATTERN="${QUALITY}${PATTERN:+,$PATTERN}"
+          fi
+          
+          # Convert comma-separated patterns to regex
+          REGEX=$(echo "$PATTERN" | tr ',' '|')
+          INDEXES=$(jq -r ".files[] | select(.name | test(\"($REGEX)\"; \"i\")) | .index" torrent_info.json | paste -sd,)
+          SELECT_FLAG="$INDEXES"
+        fi
+        
+        echo "select_flag=$SELECT_FLAG" >> $GITHUB_OUTPUT
+        echo "Selected indexes: $SELECT_FLAG"
+    
+    - name: Create download directory
+      run: mkdir -p ${{ github.event.inputs.download_path }}
     
     - name: Download torrent
       run: |
-        ./scripts/download.sh \
-          "${{ github.event.inputs.torrent_url }}" \
-          "${{ github.event.inputs.download_path }}" \
-          "${{ github.event.inputs.max_connections }}"
+        START_TIME=$(date +%s)
+        
+        if [ -n "${{ steps.select.outputs.select_flag }}" ]; then
+          ./scripts/download.sh \
+            "${{ github.event.inputs.torrent_url }}" \
+            "${{ github.event.inputs.download_path }}" \
+            "${{ github.event.inputs.max_connections }}" \
+            "${{ steps.select.outputs.select_flag }}"
+        else
+          ./scripts/download.sh \
+            "${{ github.event.inputs.torrent_url }}" \
+            "${{ github.event.inputs.download_path }}" \
+            "${{ github.event.inputs.max_connections }}"
+        fi
+        
+        END_TIME=$(date +%s)
+        DURATION=$((END_TIME - START_TIME))
+        echo "duration=$DURATION" >> $GITHUB_OUTPUT
       timeout-minutes: 360
     
-    - name: List downloaded files
+    - name: Split large files
       run: |
-        echo "=== Downloaded Files ==="
-        find ${{ github.event.inputs.download_path }} -type f -not -name '.gitkeep' -exec ls -lah {} \; | head -50
-        
-        echo ""
-        echo "=== Split Files ==="
-        if [ -d "${{ github.event.inputs.download_path }}/.split_files" ]; then
-          find ${{ github.event.inputs.download_path }}/.split_files -type f -exec ls -lah {} \; | head -50
-        else
-          echo "No split files"
-        fi
-        
-        echo ""
-        echo "=== Manifests ==="
-        if [ -d "${{ github.event.inputs.download_path }}/.manifests" ]; then
-          find ${{ github.event.inputs.download_path }}/.manifests -type f -exec echo "Manifest: {}" \;
-        fi
+        ./scripts/split_large_files.sh ${{ github.event.inputs.download_path }}
     
-    - name: Generate download summary
+    - name: Update download history
       run: |
-        echo "# Torrent Download Summary" >> $GITHUB_STEP_SUMMARY
-        echo "**Date:** $(date)" >> $GITHUB_STEP_SUMMARY
-        echo "**Download Path:** ${{ github.event.inputs.download_path }}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        TOTAL_SIZE=$(du -sh ${{ github.event.inputs.download_path }} --exclude=.split_files --exclude=.manifests | cut -f1)
-        echo "**Total Size:** $TOTAL_SIZE" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        echo "### Files" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        find ${{ github.event.inputs.download_path }} -type f -not -name '.gitkeep' -not -path '*/.split_files/*' -not -path '*/.manifests/*' -exec ls -lh {} \; >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
+        ./scripts/update-history.sh \
+          "${{ github.event.inputs.torrent_url }}" \
+          "${{ github.event.inputs.download_path }}" \
+          "${{ github.repository }}" \
+          "${{ github.ref_name }}"
+    
+    - name: Generate summary
+      run: |
+        ./scripts/generate-summary.sh \
+          "${{ github.event.inputs.download_path }}" \
+          "${{ steps.download.outputs.duration }}" \
+          "${{ github.event.inputs.torrent_url }}"
     
     - name: Commit and push files
       run: |
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-        
-        # Add all files including split files and manifests
-        git add -f ${{ github.event.inputs.download_path }}/.split_files/ || true
-        git add -f ${{ github.event.inputs.download_path }}/.manifests/ || true
         git add ${{ github.event.inputs.download_path }}/
-        git add scripts/
-        
-        # Create informative commit message
-        COMMIT_MSG="Download torrent files $(date +%Y-%m-%d)"
-        if [ -d "${{ github.event.inputs.download_path }}/.split_files" ]; then
-          SPLIT_COUNT=$(find ${{ github.event.inputs.download_path }}/.split_files -type d -name "*_parts" | wc -l)
-          COMMIT_MSG="$COMMIT_MSG - $SPLIT_COUNT files split"
-        fi
-        
-        git commit -m "$COMMIT_MSG [skip ci]" || echo "No changes to commit"
+        git add download_history.md
+        git add download_history/
+        git commit -m "Download torrent files $(date +%Y-%m-%d_%H-%M) [skip ci]" || echo "No changes to commit"
         git push
