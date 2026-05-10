@@ -37,7 +37,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y aria2 p7zip-full p7zip-rar wget curl
       
-      - name: Create download directory
+      - name: Create directories
         run: |
           mkdir -p downloads
           mkdir -p history
@@ -45,21 +45,18 @@ jobs:
       - name: Download torrent
         id: download
         run: |
-          # Create unique download folder
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          DOWNLOAD_DIR="downloads/download_${TIMESTAMP}"
+          CLEAN_NAME=$(echo "${{ github.event.inputs.torrent_url }}" | grep -oP 'dn=[^&]*' | sed 's/dn=//' | python3 -c "import sys, urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))" 2>/dev/null || echo "download")
+          DOWNLOAD_DIR="downloads/${TIMESTAMP}_${CLEAN_NAME}"
           mkdir -p "$DOWNLOAD_DIR"
           
-          # Download using aria2
           if [[ "${{ github.event.inputs.torrent_url }}" == magnet:* ]]; then
             aria2c --seed-time=0 \
                    --max-connection-per-server=${{ github.event.inputs.max_connections }} \
                    --split=${{ github.event.inputs.max_connections }} \
                    --dir="$DOWNLOAD_DIR" \
-                   --bt-save-metadata=true \
                    "${{ github.event.inputs.torrent_url }}"
           else
-            # If it's a URL, download the torrent file first
             wget -O "${DOWNLOAD_DIR}/torrent.torrent" "${{ github.event.inputs.torrent_url }}"
             aria2c --seed-time=0 \
                    --max-connection-per-server=${{ github.event.inputs.max_connections }} \
@@ -68,11 +65,6 @@ jobs:
                    "${DOWNLOAD_DIR}/torrent.torrent"
           fi
           
-          # List downloaded files
-          echo "Downloaded files:"
-          find "$DOWNLOAD_DIR" -type f ! -name "*.torrent" -exec ls -lh {} \;
-          
-          # Set output for next steps
           echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
           echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
       
@@ -80,35 +72,31 @@ jobs:
         run: |
           DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
           SPLIT_SIZE="${{ github.event.inputs.split_size }}"
-          
           bash scripts/split_large_files.sh "$DOWNLOAD_DIR" "$SPLIT_SIZE"
       
-      - name: Generate download report
+      - name: Generate report
         run: |
           DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
           TIMESTAMP="${{ steps.download.outputs.timestamp }}"
-          
           bash scripts/generate_report.sh "$DOWNLOAD_DIR" "$TIMESTAMP" "${{ github.event.inputs.torrent_url }}"
       
       - name: Update history
         run: |
-         python3 scripts/update_history.py \
-           --timestamp "${{ steps.download.outputs.timestamp }}" \
-           --torrent "${{ github.event.inputs.torrent_url }}" \
-           --repo "${{ github.repository }}"
+          python3 scripts/update_history.py \
+            --timestamp "${{ steps.download.outputs.timestamp }}" \
+            --torrent "${{ github.event.inputs.torrent_url }}" \
+            --repo "${{ github.repository }}" \
+            --branch "main"
       
       - name: Commit and push changes
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          git add downloads/ history/ README.md
           
-          # Add all downloaded files (Git LFS would be better for large files)
-          git add downloads/ history/ history.html
-          
-          # Only commit if there are changes
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Download: ${{ steps.download.outputs.timestamp }} - ${{ github.event.inputs.torrent_url }}"
+            git commit -m "📥 Download completed: ${{ steps.download.outputs.timestamp }}"
             git push
           fi
