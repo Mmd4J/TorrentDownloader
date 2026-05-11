@@ -11,6 +11,9 @@ Download history automatically updated by GitHub Actions using aria2.
 
 ## 📥 Download History
 
+### 📋 2026-05-11 09:30 - [Torrent Info](20260511_060058/torrent_info.md)
+
+
 ### 📅 2026-05-11 09:29 (Tehran)
 
 **Torrent/Magnet:**
