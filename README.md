@@ -1,3 +1,5 @@
+
+<div dir="rtl" align="center">
 > ⚠️ **IMPORTANT DISCLAIMER: FOR EDUCATIONAL PURPOSES ONLY**
 
 ---
