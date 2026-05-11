@@ -1,6 +1,6 @@
 
-<div dir="rtl" align="center">
-> ⚠️ **IMPORTANT DISCLAIMER: FOR EDUCATIONAL PURPOSES ONLY**
+<div align="center">
+> ⚠️ **IMPORTANT DISCLAIMER: FOR EDUCATIONAL PURPOSES ONLY** 
 
 ---
 <div dir="rtl" align="center">
