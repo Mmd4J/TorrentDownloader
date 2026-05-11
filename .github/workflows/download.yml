@@ -3,99 +3,332 @@ name: Torrent Downloader
 on:
   workflow_dispatch:
     inputs:
-      action:
-        description: 'Action'
-        required: true
-        type: choice
-        options:
-        - 'Download torrent'
-        - 'Show torrent info only'
-        
       torrent_url:
-        description: 'Torrent file URL or Magnet link'
+        description: 'Torrent URL or Magnet Link'
         required: true
         type: string
-        
-      download_path:
-        description: 'Download path (default: downloads)'
-        required: false
-        type: string
-        default: 'downloads'
-        
       max_connections:
-        description: 'Max connections per torrent'
+        description: 'Max connections per file (default: 16)'
         required: false
         type: string
         default: '16'
+      split_size:
+        description: 'Split size in MB (default: 95)'
+        required: false
+        type: string
+        default: '95'
+      select_files:
+        description: 'Select specific files (comma-separated indexes, e.g., "1,3,5" or leave empty for all)'
+        required: false
+        type: string
+        default: ''
+      file_pattern:
+        description: 'File pattern to match (e.g., "*.mkv", "*.mp4" or leave empty for all)'
+        required: false
+        type: string
+        default: ''
+      torrent_info_only:
+        description: 'Only show torrent contents (no download)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
 
 jobs:
-  show-info:
-    if: ${{ github.event.inputs.action == 'Show torrent info only' }}
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-    
-    - name: Install aria2
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y aria2 p7zip-full jq
-    
-    - name: Make scripts executable
-      run: chmod +x scripts/*.sh
-    
-    - name: Show torrent info
-      run: |
-        ./scripts/torrent-info.sh "${{ github.event.inputs.torrent_url }}"
-        echo ""
-        echo "::notice::To download, run the workflow again with 'Download torrent' option"
-
   download:
-    if: ${{ github.event.inputs.action == 'Download torrent' }}
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-    
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y aria2 p7zip-full jq
-    
-    - name: Make scripts executable
-      run: chmod +x scripts/*.sh
-    
-    - name: Create download directory
-      run: mkdir -p "${{ github.event.inputs.download_path }}"
-    
-    - name: Download torrent
-      run: |
-        ./scripts/download.sh \
-          "${{ github.event.inputs.torrent_url }}" \
-          "${{ github.event.inputs.download_path }}" \
-          "${{ github.event.inputs.max_connections }}"
-      timeout-minutes: 360
-    
-    - name: Split large files
-      run: |
-        ./scripts/split_large_files.sh "${{ github.event.inputs.download_path }}"
-    
-    - name: Update download history
-      run: |
-        ./scripts/update-history.sh \
-          "${{ github.event.inputs.torrent_url }}" \
-          "${{ github.event.inputs.download_path }}" \
-          "${{ github.repository }}" \
-          "${{ github.ref_name }}"
-    
-    - name: Commit and push files
-      run: |
-        git config --global user.name 'github-actions[bot]'
-        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-        git add "${{ github.event.inputs.download_path }}/"
-        git add download_history.md
-        git add download_history/
-        git commit -m "Download torrent files $(TZ='Asia/Tehran' date +%Y-%m-%d_%H-%M) [skip ci]" || echo "No changes to commit"
-        git push
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y aria2 p7zip-full p7zip-rar wget curl jq
+      
+      - name: Create directories
+        run: |
+          mkdir -p downloads
+          mkdir -p history
+          mkdir -p .temp
+      
+      - name: Get torrent info and list files
+        id: torrent_info
+        run: |
+          TORRENT_INPUT="${{ github.event.inputs.torrent_url }}"
+          TEMP_DIR=".temp"
+          
+          # Download torrent file if it's a URL
+          if [[ "$TORRENT_INPUT" != magnet:* ]]; then
+            echo "Downloading torrent file..."
+            wget -O "${TEMP_DIR}/torrent.torrent" "$TORRENT_INPUT"
+            TORRENT_FILE="${TEMP_DIR}/torrent.torrent"
+          else
+            echo "Getting magnet link info..."
+            # Use aria2 to get torrent metadata
+            aria2c --show-files=true \
+                   --dir="$TEMP_DIR" \
+                   --bt-save-metadata=true \
+                   --bt-metadata-only=true \
+                   "$TORRENT_INPUT" 2>&1 | tee "${TEMP_DIR}/torrent_info.txt"
+            
+            # Find the saved torrent file
+            TORRENT_FILE=$(find "$TEMP_DIR" -name "*.torrent" | head -n1)
+          fi
+          
+          if [ -f "$TORRENT_FILE" ]; then
+            echo "Parsing torrent file information..."
+            
+            # Use aria2 to list files in the torrent
+            aria2c --show-files=true "$TORRENT_FILE" 2>&1 | grep -E '^[0-9]+\|' > "${TEMP_DIR}/file_list.txt"
+            
+            # Create a formatted file listing
+            echo "📋 Files available in torrent:"
+            echo "================================"
+            
+            # Parse and display files
+            INDEX=1
+            while IFS='|' read -r idx size path; do
+              SIZE_HUMAN=$(numfmt --to=iec $size 2>/dev/null || echo "${size} bytes")
+              echo "[${INDEX}] ${path} (${SIZE_HUMAN})"
+              echo "${INDEX}|${idx}|${size}|${path}" >> "${TEMP_DIR}/parsed_files.txt"
+              INDEX=$((INDEX + 1))
+            done < "${TEMP_DIR}/file_list.txt"
+            
+            echo "torrent_file=${TORRENT_FILE}" >> $GITHUB_OUTPUT
+            echo "total_files=$((INDEX - 1))" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Save torrent info for display
+        if: ${{ github.event.inputs.torrent_info_only == 'true' }}
+        run: |
+          # Create a markdown file with torrent info
+          TORRENT_URL="${{ github.event.inputs.torrent_url }}"
+          TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
+          
+          cat > torrent_contents.md << EOF
+          # 📋 Torrent Contents
+          
+          **Date:** ${TEHRAN_TIME} (Tehran Time)
+          
+          **Torrent/Magnet:**
+          \`\`\`
+          ${TORRENT_URL}
+          \`\`\`
+          
+          **Files:**
+          EOF
+          
+          if [ -f ".temp/parsed_files.txt" ]; then
+            echo "" >> torrent_contents.md
+            echo "| # | File | Size |" >> torrent_contents.md
+            echo "|---|------|------|" >> torrent_contents.md
+            
+            while IFS='|' read -r display_idx aria2_idx size path; do
+              SIZE_HUMAN=$(numfmt --to=iec $size 2>/dev/null || echo "${size} bytes")
+              echo "| ${display_idx} | \`${path}\` | ${SIZE_HUMAN} |" >> torrent_contents.md
+            done < ".temp/parsed_files.txt"
+            
+            echo "" >> torrent_contents.md
+            echo "> 💡 **To download specific files**, run the workflow again with the same torrent and enter file numbers (e.g., \`1,3,5\`) in the \`select_files\` field." >> torrent_contents.md
+          else
+            echo "" >> torrent_contents.md
+            echo "⚠️ Could not retrieve file list. The torrent may be unavailable." >> torrent_contents.md
+          fi
+          
+          # Save to history
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          mkdir -p "history/${TIMESTAMP}"
+          cp torrent_contents.md "history/${TIMESTAMP}/torrent_info.md"
+          
+          # Add to history README
+          if [ -f "history/README.md" ]; then
+            TEMP_FILE=$(mktemp)
+            awk -v entry="### 📋 ${TEHRAN_TIME} (Tehran) - Torrent Info\n\n[View torrent contents](history/${TIMESTAMP}/torrent_info.md)\n\n---\n\n" '
+              /^## 📥 Download History/ {
+                print $0
+                print ""
+                print entry
+                next
+              }
+              { print }
+            ' history/README.md > "$TEMP_FILE"
+            mv "$TEMP_FILE" history/README.md
+          else
+            # Create initial history
+            cat > history/README.md << EOF
+          # 📥 Torrent Download History
+          
+          Download history automatically updated by GitHub Actions using aria2.
+          All times are in Tehran timezone (IR).
+          
+          ## 📊 Quick Stats
+          - **Download Engine:** aria2
+          - **Split Size:** Files >95MB auto-split with 7zip
+          - **Storage:** All files in \`downloads/\` directory
+          
+          ## 📥 Download History
+          
+          ### 📋 ${TEHRAN_TIME} (Tehran) - Torrent Info
+          
+          [View torrent contents](history/${TIMESTAMP}/torrent_info.md)
+          
+          ---
+          
+          EOF
+          fi
+          
+          # Commit torrent info
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add history/ torrent_contents.md
+          git commit -m "📋 Torrent info: ${TIMESTAMP}" || echo "Nothing to commit"
+          git push
+          
+          echo "✅ Torrent information saved. Check history/README.md or torrent_contents.md"
+      
+      - name: Determine files to download
+        if: ${{ github.event.inputs.torrent_info_only == 'false' }}
+        id: file_selection
+        run: |
+          SELECT_FILES="${{ github.event.inputs.select_files }}"
+          FILE_PATTERN="${{ github.event.inputs.file_pattern }}"
+          PARSED_FILE=".temp/parsed_files.txt"
+          
+          SELECT_OPTION=""
+          
+          if [ -n "$SELECT_FILES" ] && [ -f "$PARSED_FILE" ]; then
+            echo "User specified file indexes: $SELECT_FILES"
+            
+            IFS=',' read -ra INDEXES <<< "$SELECT_FILES"
+            ARIA2_INDEXES=()
+            
+            for i in "${INDEXES[@]}"; do
+              ARIA2_IDX=$(grep "^${i}|" "$PARSED_FILE" | cut -d'|' -f2)
+              if [ -n "$ARIA2_IDX" ]; then
+                ARIA2_INDEXES+=("$ARIA2_IDX")
+              fi
+            done
+            
+            if [ ${#ARIA2_INDEXES[@]} -gt 0 ]; then
+              SELECT_OPTION="--select-file=$(IFS=','; echo "${ARIA2_INDEXES[*]}")"
+            fi
+          elif [ -n "$FILE_PATTERN" ] && [ -f "$PARSED_FILE" ]; then
+            echo "User specified file pattern: $FILE_PATTERN"
+            
+            ARIA2_INDEXES=()
+            while IFS='|' read -r display_idx aria2_idx size path; do
+              if [[ "$path" == $FILE_PATTERN ]]; then
+                ARIA2_INDEXES+=("$aria2_idx")
+                echo "Match: [$display_idx] $path"
+              fi
+            done < "$PARSED_FILE"
+            
+            if [ ${#ARIA2_INDEXES[@]} -gt 0 ]; then
+              SELECT_OPTION="--select-file=$(IFS=','; echo "${ARIA2_INDEXES[*]}")"
+            fi
+          fi
+          
+          if [ -z "$SELECT_OPTION" ]; then
+            echo "Downloading all files"
+          fi
+          
+          echo "select_option=${SELECT_OPTION}" >> $GITHUB_OUTPUT
+      
+      - name: Download torrent
+        if: ${{ github.event.inputs.torrent_info_only == 'false' }}
+        id: download
+        run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          
+          # Extract torrent name
+          CLEAN_NAME=$(echo "${{ github.event.inputs.torrent_url }}" | grep -oP 'dn=[^&]*' | sed 's/dn=//' | python3 -c "import sys, urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))" 2>/dev/null || echo "download")
+          CLEAN_NAME=$(echo "$CLEAN_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c1-100)
+          
+          DOWNLOAD_DIR="downloads/${TIMESTAMP}_${CLEAN_NAME}"
+          mkdir -p "$DOWNLOAD_DIR"
+          
+          # Build aria2 command
+          ARIA2_CMD="aria2c --seed-time=0"
+          ARIA2_CMD="$ARIA2_CMD --max-connection-per-server=${{ github.event.inputs.max_connections }}"
+          ARIA2_CMD="$ARIA2_CMD --split=${{ github.event.inputs.max_connections }}"
+          ARIA2_CMD="$ARIA2_CMD --dir=$DOWNLOAD_DIR"
+          ARIA2_CMD="$ARIA2_CMD --console-log-level=notice"
+          
+          if [ -n "${{ steps.file_selection.outputs.select_option }}" ]; then
+            ARIA2_CMD="$ARIA2_CMD ${{ steps.file_selection.outputs.select_option }}"
+          fi
+          
+          if [[ "${{ github.event.inputs.torrent_url }}" == magnet:* ]]; then
+            ARIA2_CMD="$ARIA2_CMD ${{ github.event.inputs.torrent_url }}"
+          else
+            wget -O "${DOWNLOAD_DIR}/torrent.torrent" "${{ github.event.inputs.torrent_url }}"
+            ARIA2_CMD="$ARIA2_CMD ${DOWNLOAD_DIR}/torrent.torrent"
+          fi
+          
+          echo "Running: $ARIA2_CMD"
+          eval "$ARIA2_CMD"
+          
+          # Clean up
+          rm -f "${DOWNLOAD_DIR}/torrent.torrent" "${DOWNLOAD_DIR}"/*.aria2
+          
+          # List downloaded files
+          echo "Downloaded files:"
+          find "$DOWNLOAD_DIR" -type f ! -name "*.torrent" -exec ls -lh {} \;
+          
+          echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
+          echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
+      
+      - name: Split large files
+        if: ${{ github.event.inputs.torrent_info_only == 'false' }}
+        run: |
+          DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
+          SPLIT_SIZE="${{ github.event.inputs.split_size }}"
+          
+          chmod +x scripts/split_large_files.sh
+          bash scripts/split_large_files.sh "$DOWNLOAD_DIR" "$SPLIT_SIZE"
+      
+      - name: Generate report
+        if: ${{ github.event.inputs.torrent_info_only == 'false' }}
+        run: |
+          DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
+          TIMESTAMP="${{ steps.download.outputs.timestamp }}"
+          
+          chmod +x scripts/generate_report.sh
+          bash scripts/generate_report.sh \
+            "$DOWNLOAD_DIR" \
+            "$TIMESTAMP" \
+            "${{ github.event.inputs.torrent_url }}"
+      
+      - name: Update history
+        if: ${{ github.event.inputs.torrent_info_only == 'false' }}
+        run: |
+          chmod +x scripts/update_history.sh
+          bash scripts/update_history.sh \
+            "${{ steps.download.outputs.timestamp }}" \
+            "${{ github.event.inputs.torrent_url }}" \
+            "${{ github.repository }}" \
+            "${{ github.ref_name }}"
+      
+      - name: Commit and push changes
+        if: ${{ github.event.inputs.torrent_info_only == 'false' }}
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          rm -rf .temp
+          
+          git add downloads/ history/ README.md
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "📥 Download: ${{ steps.download.outputs.timestamp }}"
+            git push
+          fi
