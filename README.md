@@ -1,6 +1,10 @@
 > ⚠️ **IMPORTANT DISCLAIMER: FOR EDUCATIONAL PURPOSES ONLY**
 
 ---
+<div dir="rtl" align="center">
+   
+**[#️⃣ Download History And Links](./history/README.md#)**
+
 
 ## ⚖️ Legal Disclaimer
 
