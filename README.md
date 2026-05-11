@@ -5,7 +5,7 @@
 ---
 <div dir="rtl" align="center">
    
-**[#️⃣ Download History And Links](./history/README.md#)**
+**[📜 View Download History](history/README.md)**
 
 
 ## ⚖️ Legal Disclaimer
@@ -64,4 +64,5 @@ chmod +x scripts/*.sh
 
 
 
-[📜 View Download History](history/README.md)
+
+
