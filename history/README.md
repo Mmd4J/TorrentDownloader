@@ -1,13 +1,3 @@
-# 📥 Torrent Download History
-
-Download history automatically updated by GitHub Actions using aria2.
-
-## 📊 Quick Stats
-- **Download Engine:** aria2
-- **Split Size:** Files >95MB are split with 7zip
-- **Storage:** All files in `downloads/` directory
-
-## 📥 Download History
 
 ### 📅 2026-05-10 21:55:24 UTC
 
