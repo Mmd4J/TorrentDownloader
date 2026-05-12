@@ -242,28 +242,37 @@ jobs:
         run: |
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
           MODE="${{ github.event.inputs.mode }}"
-          CLEAN_NAME="${{ steps.check_existing.outputs.clean_name }}"
-          if [ "${{ steps.check_existing.outputs.status }}" = "resuming" ] && [ "$MODE" != "Upload as Artifact" ]; then
-            DOWNLOAD_DIR="${{ steps.check_existing.outputs.existing_dir }}"
-            TIMESTAMP="${{ steps.check_existing.outputs.existing_timestamp }}"
-            mkdir -p "$DOWNLOAD_DIR"
+          TORRENT_URL="${{ github.event.inputs.url }}"
+          
+          # Check if this is a torrent/magnet
+          if [[ "$TORRENT_URL" == magnet:* ]] || [[ "$TORRENT_URL" == *.torrent* ]]; then
+            IS_TORRENT=true
           else
-            DOWNLOAD_DIR="downloads/${TIMESTAMP}_${CLEAN_NAME}"
-            mkdir -p "$DOWNLOAD_DIR"
+            IS_TORRENT=false
           fi
-          if [[ "$MODE" == "Direct Download" ]]; then
-            aria2c --max-connection-per-server=${{ github.event.inputs.max_connections }} \
-                   --split=${{ github.event.inputs.max_connections }} \
-                   --dir="$DOWNLOAD_DIR" \
-                   --out="${CLEAN_NAME}" \
-                   --continue=true \
-                   --file-allocation=falloc \
-                   "${{ github.event.inputs.url }}"
+          
+          # Get clean name
+          CLEAN_NAME="download"
+          if [ -n "${{ github.event.inputs.output_filename }}" ]; then
+            CLEAN_NAME=$(echo "${{ github.event.inputs.output_filename }}" | sed 's/[^a-zA-Z0-9._-]/_/g')
+          elif [ "$IS_TORRENT" = true ] && echo "$TORRENT_URL" | grep -q "dn="; then
+            CLEAN_NAME=$(echo "$TORRENT_URL" | grep -oP 'dn=[^&]*' | sed 's/dn=//' | python3 -c "import sys, urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))" 2>/dev/null)
+            CLEAN_NAME=$(echo "$CLEAN_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c1-100)
           else
-            if [[ "${{ github.event.inputs.url }}" == magnet:* ]]; then
-              ARIA2_INPUT="${{ github.event.inputs.url }}"
+            URL_PATH=$(echo "$TORRENT_URL" | sed 's/\?.*//')
+            CLEAN_NAME=$(basename "$URL_PATH" | sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c1-100)
+            [ -z "$CLEAN_NAME" ] && CLEAN_NAME="download"
+          fi
+          
+          DOWNLOAD_DIR="downloads/${TIMESTAMP}_${CLEAN_NAME}"
+          mkdir -p "$DOWNLOAD_DIR"
+          
+          if [ "$IS_TORRENT" = true ]; then
+            # Torrent download
+            if [[ "$TORRENT_URL" == magnet:* ]]; then
+              ARIA2_INPUT="$TORRENT_URL"
             else
-              aria2c --dir="${DOWNLOAD_DIR}" --out="torrent.torrent" "${{ github.event.inputs.url }}"
+              aria2c --dir="${DOWNLOAD_DIR}" --out="torrent.torrent" "$TORRENT_URL"
               ARIA2_INPUT="${DOWNLOAD_DIR}/torrent.torrent"
             fi
             aria2c --seed-time=0 \
@@ -275,42 +284,19 @@ jobs:
                    ${{ steps.file_selection.outputs.select_option }} \
                    "$ARIA2_INPUT"
             rm -f "${DOWNLOAD_DIR}/torrent.torrent"
+          else
+            # Direct download
+            aria2c --max-connection-per-server=${{ github.event.inputs.max_connections }} \
+                   --split=${{ github.event.inputs.max_connections }} \
+                   --dir="$DOWNLOAD_DIR" \
+                   --out="${CLEAN_NAME}" \
+                   --continue=true \
+                   --file-allocation=falloc \
+                   "$TORRENT_URL"
           fi
+          
           echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
           echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
-
-      - name: Zip entire folder
-        if: github.event.inputs.mode == 'Torrent - Zip Entire Folder'
-        run: |
-          cd "${{ steps.download.outputs.download_dir }}"
-          MAIN_FOLDER=$(find . -maxdepth 1 -type d ! -name '.' | head -n1)
-          if [ -n "$MAIN_FOLDER" ]; then
-            FOLDER_NAME=$(basename "$MAIN_FOLDER")
-            ls "${FOLDER_NAME}.zip".* >/dev/null 2>&1 || 7z a -tzip -mx0 -mmt=on "${FOLDER_NAME}.zip" "$MAIN_FOLDER" && rm -rf "$MAIN_FOLDER"
-          fi
-
-      - name: Split large files
-        if: github.event.inputs.mode != 'Torrent - Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
-        run: |
-          DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
-          SPLIT_SIZE=$((95 * 1048576))
-          echo "Checking for files larger than 95MB..."
-          find "$DOWNLOAD_DIR" -type f ! -name "*.7z.*" -print0 | while IFS= read -r -d '' file; do
-            FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
-            BASENAME=$(basename "$file")
-            DIRNAME=$(dirname "$file")
-            EXISTING_PARTS=$(find "$DIRNAME" -maxdepth 1 -name "${BASENAME}.7z.*" 2>/dev/null | head -1)
-            if [ -n "$EXISTING_PARTS" ]; then
-              echo "Already split: $BASENAME"
-              continue
-            fi
-            if [ "$FILE_SIZE" -gt "$SPLIT_SIZE" ]; then
-              echo "Splitting: $BASENAME"
-              7z a -v95m -mx0 -mmt=on "${DIRNAME}/${BASENAME}.7z" "$file" && rm "$file"
-            fi
-          done
-          echo "Done."
-
       - name: Upload as artifact
         if: github.event.inputs.mode == 'Upload as Artifact'
         uses: actions/upload-artifact@v4
