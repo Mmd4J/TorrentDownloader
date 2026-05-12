@@ -516,4 +516,28 @@ jobs:
           export DOWNLOAD_DIR="$DOWNLOAD_DIR"
           export TORRENT_URL="$TORRENT_URL"
           export TEHRAN_TIME="$TEHRAN_TIME"
-          export HIS
+          export HISTORY_README="$HISTORY_README"
+          
+          python3 /tmp/update_history.py
+      
+      - name: Commit and push changes
+        if: github.event.inputs.mode == 'Download Files'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          rm -rf .temp
+          
+          git add downloads/ history/
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "📥 Download: ${{ steps.download.outputs.timestamp }}"
+            git push
+          fi
+          
+          echo "==========================================="
+          echo "DONE! View history at:"
+          echo "https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/history/README.md"
+          echo "==========================================="
