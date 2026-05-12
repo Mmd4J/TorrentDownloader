@@ -16,7 +16,6 @@ on:
           - 'Torrent - Preserve Structure'
           - 'Torrent - Zip Entire Folder'
           - 'Torrent - Show Info Only'
-          - 'Direct Download'
           - 'Upload as Artifact'
         default: 'Torrent - Flat Files'
       max_connections:
