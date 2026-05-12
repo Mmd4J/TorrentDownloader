@@ -356,16 +356,17 @@ jobs:
         run: |
           export TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
           
-          python3 << 'PYEOF'
+          # Write Python script to a file
+          cat > /tmp/update_history.py << 'SCRIPTEND'
           import json, urllib.parse, os, re
           from collections import defaultdict
           
-          timestamp = "${{ steps.download.outputs.timestamp }}"
-          repo = "${{ github.repository }}"
-          branch = "${{ github.ref_name }}"
-          download_dir = "${{ steps.download.outputs.download_dir }}"
-          torrent_url = "${{ github.event.inputs.url }}"
-          mode = "${{ github.event.inputs.mode }}"
+          timestamp = os.environ['TIMESTAMP']
+          repo = os.environ['REPO']
+          branch = os.environ['BRANCH']
+          download_dir = os.environ['DOWNLOAD_DIR']
+          torrent_url = os.environ['TORRENT_URL']
+          mode = os.environ['MODE']
           tehran_time = os.environ['TEHRAN_TIME']
           
           manifest_file = f"history/{timestamp}/manifest.json"
@@ -400,62 +401,56 @@ jobs:
           
           def make_link(path):
               encoded = urllib.parse.quote(path, safe='')
-              full_path = f"{download_dir}/{encoded}"
-              return f"https://raw.githubusercontent.com/{repo}/{branch}/{full_path}"
+              return f"https://github.com/{repo}/raw/refs/heads/{branch}/{download_dir}/{encoded}"
           
           all_links = []
+          entry_lines = []
           
-          # Write entry to temp file line by line
-          with open('/tmp/entry.md', 'w') as f:
-              f.write(f"### 📅 {tehran_time} (Tehran)\n")
-              f.write("\n")
-              f.write(f"**Mode:** {mode}\n")
-              f.write("\n")
-              f.write("**Files:**\n")
-              f.write("\n")
+          entry_lines.append(f"### 📅 {tehran_time} (Tehran)")
+          entry_lines.append("")
+          entry_lines.append(f"**Mode:** {mode}")
+          entry_lines.append("")
+          entry_lines.append("**Files:**")
+          entry_lines.append("")
+          
+          for file_info in normal_files:
+              l = make_link(file_info['path'])
+              all_links.append(l)
+              entry_lines.append(f"- {get_icon(file_info['path'])} [**{file_info['path']}**]({l}) - {file_info['size_human']}")
+          
+          for b, p in sorted(split_groups.items()):
+              p.sort(key=lambda x: x['path'])
+              ts = sum(x['size'] for x in p)
+              if ts >= 1073741824:
+                  th = f'{ts/1073741824:.2f}GB'
+              elif ts >= 1048576:
+                  th = f'{ts/1048576:.1f}MB'
+              else:
+                  th = f'{ts//1024}KB'
               
-              for file_info in normal_files:
-                  l = make_link(file_info['path'])
+              entry_lines.append("")
+              entry_lines.append(f"- 📦 **{b}.7z** (Split Archive - {th} total)")
+              
+              for i, pt in enumerate(p):
+                  l = make_link(pt['path'])
                   all_links.append(l)
-                  f.write(f"- {get_icon(file_info['path'])} [**{file_info['path']}**]({l}) - {file_info['size_human']}\n")
+                  px = "  └─" if i == len(p) - 1 else "  ├─"
+                  entry_lines.append(f"{px} 📎 [**{pt['path']}**]({l}) - {pt['size_human']}")
               
-              for b, p in sorted(split_groups.items()):
-                  p.sort(key=lambda x: x['path'])
-                  ts = sum(x['size'] for x in p)
-                  if ts >= 1073741824:
-                      th = f'{ts/1073741824:.2f}GB'
-                  elif ts >= 1048576:
-                      th = f'{ts/1048576:.1f}MB'
-                  else:
-                      th = f'{ts//1024}KB'
-                  
-                  f.write("\n")
-                  f.write(f"- 📦 **{b}.7z** (Split Archive - {th} total)\n")
-                  
-                  for i, pt in enumerate(p):
-                      l = make_link(pt['path'])
-                      all_links.append(l)
-                      px = "  └─" if i == len(p) - 1 else "  ├─"
-                      f.write(f"{px} 📎 [**{pt['path']}**]({l}) - {pt['size_human']}\n")
-                  
-                  f.write(f"  💡 *Download all parts, then: `7z x {p[0]['path']}`*\n")
-              
-              f.write("\n")
-              links_raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/history/{timestamp}/links.txt"
-              f.write(f"[📋 Download All Links]({links_raw_url})\n")
-              f.write("\n")
-              f.write("---\n")
-              f.write("\n")
+              entry_lines.append(f"  💡 *Download all parts, then: `7z x {p[0]['path']}`*")
           
-          # Write links file
+          entry_lines.append("")
+          links_raw_url = f"https://github.com/{repo}/raw/refs/heads/{branch}/history/{timestamp}/links.txt"
+          entry_lines.append(f"[📋 Download All Links]({links_raw_url})")
+          entry_lines.append("")
+          entry_lines.append("---")
+          entry_lines.append("")
+          
+          entry = "\n".join(entry_lines)
+          
           with open(links_file, 'w') as f:
               f.write("\n".join(all_links) + "\n")
           
-          # Read entry back
-          with open('/tmp/entry.md') as f:
-              entry = f.read()
-          
-          # Update history README
           if os.path.exists(history_readme):
               with open(history_readme) as f:
                   content = f.read()
@@ -472,8 +467,18 @@ jobs:
               f.write(new_content)
           
           print("✅ History updated!")
-          PYEOF
-      - name: Commit and push changes
+          SCRIPTEND
+          
+          # Export all variables
+          export TIMESTAMP="${{ steps.download.outputs.timestamp }}"
+          export REPO="${{ github.repository }}"
+          export BRANCH="${{ github.ref_name }}"
+          export DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
+          export TORRENT_URL="${{ github.event.inputs.url }}"
+          export MODE="${{ github.event.inputs.mode }}"
+          
+          # Run the script
+          python3 /tmp/update_history.py      - name: Commit and push changes
         if: github.event.inputs.mode != 'Torrent - Show Info Only'
         run: |
           git config --local user.email "action@github.com"
