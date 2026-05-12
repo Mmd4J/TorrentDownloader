@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'Torrent/Magnet/URL (Separate multiple with space, comma, or new line)'
+        description: 'Torrent/Magnet/URL (Separate multiple with space, comma, or new line)[handles direct downloads automaticly]'
         required: true
         type: string
       mode:
