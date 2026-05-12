@@ -1,0 +1,11 @@
+{
+  "timestamp": "20260512_174731",
+  "url": "https://github.com/digimezzo/dopamine/releases/download/v3.0.4/Dopamine-3.0.4.AppImage",
+  "mode": "Torrent - Flat Files",
+  "download_dir": "downloads/20260512_174731_Dopamine-3.0.4.AppImage",
+  "files": [
+    {"path": "Dopamine-3.0.4.AppImage.7z.001", "size": 99614720, "size_human": "95M", "sha256": "4c91d01c47063e8bbde3ca01020c94b995078dd8c8dda7429ea32d1748dabc6c"}
+,
+    {"path": "Dopamine-3.0.4.AppImage.7z.002", "size": 62092927, "size_human": "60M", "sha256": "f91994a27eeeb7c5ba804e6371d6a51a2781b9834a06b811e474b7b52057a5e3"}
+  ]
+}
