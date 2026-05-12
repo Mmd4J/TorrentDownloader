@@ -351,17 +351,13 @@ jobs:
           done
           echo "  ]" >> "${REPORT_DIR}/manifest.json"
           echo "}" >> "${REPORT_DIR}/manifest.json"
-
       - name: Update history
         if: github.event.inputs.mode != 'Torrent - Show Info Only'
         run: |
           export TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
           
           python3 << 'PYEOF'
-          import json
-          import urllib.parse
-          import os
-          import re
+          import json, urllib.parse, os, re
           from collections import defaultdict
           
           timestamp = "${{ steps.download.outputs.timestamp }}"
@@ -408,53 +404,58 @@ jobs:
               return f"https://raw.githubusercontent.com/{repo}/{branch}/{full_path}"
           
           all_links = []
-          lines = []
           
-          lines.append(f"### 📅 {tehran_time} (Tehran)")
-          lines.append("")
-          lines.append(f"**Mode:** {mode}")
-          lines.append("")
-          lines.append("**Files:**")
-          lines.append("")
-          
-          for f in normal_files:
-              l = make_link(f['path'])
-              all_links.append(l)
-              lines.append(f"- {get_icon(f['path'])} [**{f['path']}**]({l}) - {f['size_human']}")
-          
-          for b, p in sorted(split_groups.items()):
-              p.sort(key=lambda x: x['path'])
-              ts = sum(x['size'] for x in p)
-              if ts >= 1073741824:
-                  th = f'{ts/1073741824:.2f}GB'
-              elif ts >= 1048576:
-                  th = f'{ts/1048576:.1f}MB'
-              else:
-                  th = f'{ts//1024}KB'
+          # Write entry to temp file line by line
+          with open('/tmp/entry.md', 'w') as f:
+              f.write(f"### 📅 {tehran_time} (Tehran)\n")
+              f.write("\n")
+              f.write(f"**Mode:** {mode}\n")
+              f.write("\n")
+              f.write("**Files:**\n")
+              f.write("\n")
               
-              lines.append("")
-              lines.append(f"- 📦 **{b}.7z** (Split Archive - {th} total)")
-              
-              for i, pt in enumerate(p):
-                  l = make_link(pt['path'])
+              for file_info in normal_files:
+                  l = make_link(file_info['path'])
                   all_links.append(l)
-                  px = "  └─" if i == len(p) - 1 else "  ├─"
-                  lines.append(f"{px} 📎 [**{pt['path']}**]({l}) - {pt['size_human']}")
+                  f.write(f"- {get_icon(file_info['path'])} [**{file_info['path']}**]({l}) - {file_info['size_human']}\n")
               
-              lines.append(f"  💡 *Download all parts, then: `7z x {p[0]['path']}`*")
+              for b, p in sorted(split_groups.items()):
+                  p.sort(key=lambda x: x['path'])
+                  ts = sum(x['size'] for x in p)
+                  if ts >= 1073741824:
+                      th = f'{ts/1073741824:.2f}GB'
+                  elif ts >= 1048576:
+                      th = f'{ts/1048576:.1f}MB'
+                  else:
+                      th = f'{ts//1024}KB'
+                  
+                  f.write("\n")
+                  f.write(f"- 📦 **{b}.7z** (Split Archive - {th} total)\n")
+                  
+                  for i, pt in enumerate(p):
+                      l = make_link(pt['path'])
+                      all_links.append(l)
+                      px = "  └─" if i == len(p) - 1 else "  ├─"
+                      f.write(f"{px} 📎 [**{pt['path']}**]({l}) - {pt['size_human']}\n")
+                  
+                  f.write(f"  💡 *Download all parts, then: `7z x {p[0]['path']}`*\n")
+              
+              f.write("\n")
+              links_raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/history/{timestamp}/links.txt"
+              f.write(f"[📋 Download All Links]({links_raw_url})\n")
+              f.write("\n")
+              f.write("---\n")
+              f.write("\n")
           
-          lines.append("")
-          links_raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/history/{timestamp}/links.txt"
-          lines.append(f"[📋 Download All Links]({links_raw_url})")
-          lines.append("")
-          lines.append("---")
-          lines.append("")
-          
-          entry = "\n".join(lines)
-          
+          # Write links file
           with open(links_file, 'w') as f:
               f.write("\n".join(all_links) + "\n")
           
+          # Read entry back
+          with open('/tmp/entry.md') as f:
+              entry = f.read()
+          
+          # Update history README
           if os.path.exists(history_readme):
               with open(history_readme) as f:
                   content = f.read()
