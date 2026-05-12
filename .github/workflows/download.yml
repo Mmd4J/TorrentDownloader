@@ -52,6 +52,9 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+      # ============================================
+      # STEP 1: Initial checkout - only history (tiny files)
+      # ============================================
       - name: Checkout history only (fast)
         uses: actions/checkout@v4
         with:
@@ -62,12 +65,16 @@ jobs:
             history/
           sparse-checkout-cone-mode: false
       
+      # ============================================
+      # STEP 2: Check existing downloads via manifest
+      # ============================================
       - name: Check existing downloads from history
         id: check_existing
         run: |
           MODE="${{ github.event.inputs.mode }}"
           TORRENT_URL="${{ github.event.inputs.url }}"
           
+          # Extract clean name for matching
           if [[ "$MODE" == "Direct Download" ]]; then
             if [ -n "${{ github.event.inputs.output_filename }}" ]; then
               CLEAN_NAME=$(echo "${{ github.event.inputs.output_filename }}" | sed 's/[^a-zA-Z0-9._-]/_/g')
@@ -86,6 +93,7 @@ jobs:
           
           echo "Looking for existing downloads matching: $CLEAN_NAME"
           
+          # Search history manifests for matching download
           EXISTING_DIR=""
           EXISTING_TIMESTAMP=""
           
@@ -95,11 +103,18 @@ jobs:
                 MANIFEST_DIR=$(jq -r '.download_dir' "$MANIFEST" 2>/dev/null)
                 MANIFEST_URL=$(jq -r '.url' "$MANIFEST" 2>/dev/null)
                 
+                # Match by torrent URL or by folder name ending
                 if [ "$MANIFEST_URL" = "$TORRENT_URL" ] || echo "$MANIFEST_DIR" | grep -q "_${CLEAN_NAME}$"; then
+                  # Extract folder name from manifest
                   EXISTING_DIR="$MANIFEST_DIR"
                   EXISTING_TIMESTAMP=$(jq -r '.timestamp' "$MANIFEST" 2>/dev/null)
                   echo "✅ Found existing download: $EXISTING_DIR"
                   echo "   Files in manifest: $(jq '.files | length' "$MANIFEST")"
+                  
+                  # List what's already downloaded
+                  jq -r '.files[].path' "$MANIFEST" | while read -r fpath; do
+                    echo "   📄 $fpath"
+                  done
                   break
                 fi
               fi
@@ -117,6 +132,9 @@ jobs:
           
           echo "clean_name=${CLEAN_NAME}" >> $GITHUB_OUTPUT
       
+      # ============================================
+      # STEP 3: Full checkout if resuming (include existing downloads)
+      # ============================================
       - name: Full checkout for resume
         if: steps.check_existing.outputs.status == 'resuming'
         uses: actions/checkout@v4
@@ -128,677 +146,705 @@ jobs:
             history/
             ${{ steps.check_existing.outputs.existing_dir }}/
           sparse-checkout-cone-mode: false
-- name: Configure git for large files
-  run: |
-    cat >> .gitattributes << 'EOF'
-    *.7z.* -delta
-    *.zip -delta
-    *.rar -delta
-    *.mp4 -delta
-    *.mkv -delta
-    *.avi -delta
-    *.mov -delta
-    *.webm -delta
-    *.mp3 -delta
-    *.flac -delta
-    *.ogg -delta
-    *.m4a -delta
-    *.wav -delta
-    *.jpg -delta
-    *.jpeg -delta
-    *.png -delta
-    *.gif -delta
-    *.webp -delta
-    *.pdf -delta
-    *.epub -delta
-    *.exe -delta
-    *.apk -delta
-    EOF
-    
-    git config core.compression 0
-    git config core.looseCompression 0
-    git config pack.compression 0
-    git config pack.deltaCacheSize 1
-    git config pack.windowMemory 100m
-    git config pack.threads 1
-    echo "✅ Git configured for binary files"
-
-- name: Cache apt packages
-  uses: actions/cache@v4
-  with:
-    path: /var/cache/apt/archives
-    key: apt-cache-${{ runner.os }}-${{ hashFiles('.github/workflows/torrent-downloader.yml') }}
-    restore-keys: |
-      apt-cache-${{ runner.os }}-
-
-- name: Install dependencies
-  run: |
-    sudo apt-get update
-    sudo apt-get install -y aria2 p7zip-full p7zip-rar wget curl jq python3
-
-- name: Create directories
-  run: |
-    mkdir -p downloads history .temp
-
-- name: Cache torrent metadata
-  if: contains(github.event.inputs.mode, 'Torrent')
-  id: torrent_cache
-  uses: actions/cache@v4
-  with:
-    path: .temp/torrent_cache
-    key: torrent-meta-${{ github.event.inputs.url }}
-
-- name: Get torrent info and list files
-  if: contains(github.event.inputs.mode, 'Torrent')
-  id: torrent_info
-  run: |
-    TORRENT_INPUT="${{ github.event.inputs.url }}"
-    
-    echo "==========================================="
-    echo "Getting torrent information..."
-    echo "==========================================="
-    
-    if [ -f ".temp/torrent_cache/parsed_files.txt" ] && [ -f ".temp/torrent_cache/torrent.torrent" ]; then
-      echo "✅ Using cached torrent metadata"
-      mkdir -p .temp
-      cp .temp/torrent_cache/parsed_files.txt .temp/
-      cp .temp/torrent_cache/file_list.txt .temp/ 2>/dev/null
-      cp .temp/torrent_cache/torrent.torrent .temp/
-      TORRENT_FILE=".temp/torrent.torrent"
-    else
-      if [[ "$TORRENT_INPUT" != magnet:* ]]; then
-        echo "Downloading torrent file..."
-        wget -O ".temp/torrent.torrent" "$TORRENT_INPUT"
-        TORRENT_FILE=".temp/torrent.torrent"
-      else
-        echo "Getting magnet link metadata..."
-        aria2c --show-files=true \
-               --dir=".temp" \
-               --bt-save-metadata=true \
-               --bt-metadata-only=true \
-               "$TORRENT_INPUT" 2>&1
-        TORRENT_FILE=$(find ".temp" -name "*.torrent" 2>/dev/null | head -n1)
-      fi
       
-      if [ -f "$TORRENT_FILE" ]; then
-        aria2c --show-files=true "$TORRENT_FILE" 2>&1 | grep -E '^[[:space:]]*[0-9]+\|' > ".temp/file_list.txt"
-        
-        INDEX=1
-        > ".temp/parsed_files.txt"
-        while IFS='|' read -r idx size path; do
-          idx=$(echo "$idx" | xargs)
-          size=$(echo "$size" | xargs)
-          path=$(echo "$path" | xargs)
-          [ -z "$path" ] && continue
-          echo "${INDEX}|${idx}|${size}|${path}" >> ".temp/parsed_files.txt"
-          INDEX=$((INDEX + 1))
-        done < ".temp/file_list.txt"
-        
-        mkdir -p .temp/torrent_cache
-        cp .temp/parsed_files.txt .temp/file_list.txt .temp/torrent.torrent .temp/torrent_cache/ 2>/dev/null
-        echo "✅ Metadata cached for future runs"
-      fi
-    fi
-    
-    if [ -f "$TORRENT_FILE" ]; then
-      echo ""
-      echo "📋 Files available in torrent:"
-      echo "================================"
+      # ============================================
+      # STEP 4: Configure git for binary files
+      # ============================================
+      - name: Configure git for large files
+        run: |
+          cat >> .gitattributes << 'EOF'
+          # Binary files - don't try to delta compress them
+          *.7z.* -delta
+          *.zip -delta
+          *.rar -delta
+          *.mp4 -delta
+          *.mkv -delta
+          *.avi -delta
+          *.mov -delta
+          *.webm -delta
+          *.mp3 -delta
+          *.flac -delta
+          *.ogg -delta
+          *.m4a -delta
+          *.wav -delta
+          *.jpg -delta
+          *.jpeg -delta
+          *.png -delta
+          *.gif -delta
+          *.webp -delta
+          *.pdf -delta
+          *.epub -delta
+          *.exe -delta
+          *.apk -delta
+          EOF
+          
+          git config core.compression 0
+          git config core.looseCompression 0
+          git config pack.compression 0
+          git config pack.deltaCacheSize 1
+          git config pack.windowMemory 100m
+          git config pack.threads 1
+          echo "✅ Git configured for binary files"
       
-      while IFS='|' read -r index idx size path; do
-        if command -v numfmt &> /dev/null; then
-          SIZE_HUMAN=$(numfmt --to=iec "$size" 2>/dev/null)
-        else
-          SIZE_HUMAN="$size bytes"
-        fi
-        echo "[${index}] ${path} (${SIZE_HUMAN})"
-      done < ".temp/parsed_files.txt"
+      # ============================================
+      # STEP 5: Cache apt packages
+      # ============================================
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-cache-${{ runner.os }}-${{ hashFiles('.github/workflows/torrent-downloader.yml') }}
+          restore-keys: |
+            apt-cache-${{ runner.os }}-
       
-      TOTAL=$(wc -l < ".temp/parsed_files.txt")
-      echo "================================"
-      echo "Total files: $TOTAL"
-      echo "torrent_file=${TORRENT_FILE}" >> $GITHUB_OUTPUT
-    else
-      echo "⚠️ Could not retrieve torrent metadata"
-    fi
-- name: Show torrent info only
-  if: github.event.inputs.mode == 'Torrent - Show Info Only'
-  run: |
-    TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
-    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-    mkdir -p "history/${TIMESTAMP}"
-    
-    cat > "history/${TIMESTAMP}/torrent_info.md" << EOF
-    # 📋 Torrent Contents
-    
-    **Date:** ${TEHRAN_TIME} (Tehran Time)
-    
-    **Torrent/Magnet:**
-    \`\`\`
-    ${{ github.event.inputs.url }}
-    \`\`\`
-    
-    **Files:**
-    
-    | # | File | Size |
-    |---|------|------|
-    EOF
-    
-    if [ -f ".temp/parsed_files.txt" ]; then
-      while IFS='|' read -r display_idx aria2_idx size path; do
-        if command -v numfmt &> /dev/null; then
-          SIZE_HUMAN=$(numfmt --to=iec "$size" 2>/dev/null)
-        else
-          SIZE_HUMAN="$size bytes"
-        fi
-        echo "| ${display_idx} | \`${path}\` | ${SIZE_HUMAN} |" >> "history/${TIMESTAMP}/torrent_info.md"
-      done < ".temp/parsed_files.txt"
-    fi
-    
-    echo "" >> "history/${TIMESTAMP}/torrent_info.md"
-    echo "> 💡 **To download:** Run workflow again with download mode" >> "history/${TIMESTAMP}/torrent_info.md"
-    
-    if [ -f "history/README.md" ]; then
-      python3 -c "
-    content = open('history/README.md').read()
-    entry = '### 📋 ${TEHRAN_TIME} (Tehran) - [Torrent Info](${TIMESTAMP}/torrent_info.md)\n\n---\n\n'
-    if '## 📥 Download History' in content:
-        parts = content.split('## 📥 Download History', 1)
-        new_content = parts[0] + '## 📥 Download History\n\n' + entry + parts[1]
-    else:
-        new_content = content + '\n' + entry
-    open('history/README.md', 'w').write(new_content)
-    "
-    else
-      cat > "history/README.md" << EOF
-    # 📥 Torrent Download History
-    
-    All times in **Tehran timezone (IR)**.
-    
-    ## 📥 Download History
-    
-    ### 📋 ${TEHRAN_TIME} (Tehran) - [Torrent Info](${TIMESTAMP}/torrent_info.md)
-    
-    ---
-    EOF
-    fi
-    
-    git config --local user.email "action@github.com"
-    git config --local user.name "GitHub Action"
-    git add .gitattributes history/
-    git commit -m "📋 Torrent info: ${TIMESTAMP}" || echo "Nothing to commit"
-    git push
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y aria2 p7zip-full p7zip-rar wget curl jq python3
+      
+      - name: Create directories
+        run: |
+          mkdir -p downloads history .temp
+      
+      # ============================================
+      # STEP 6: Cache torrent metadata
+      # ============================================
+      - name: Cache torrent metadata
+        if: contains(github.event.inputs.mode, 'Torrent')
+        id: torrent_cache
+        uses: actions/cache@v4
+        with:
+          path: .temp/torrent_cache
+          key: torrent-meta-${{ github.event.inputs.url }}
+      
+      - name: Get torrent info and list files
+        if: contains(github.event.inputs.mode, 'Torrent')
+        id: torrent_info
+        run: |
+          TORRENT_INPUT="${{ github.event.inputs.url }}"
+          
+          echo "==========================================="
+          echo "Getting torrent information..."
+          echo "==========================================="
+          
+          # Check cached metadata
+          if [ -f ".temp/torrent_cache/parsed_files.txt" ] && [ -f ".temp/torrent_cache/torrent.torrent" ]; then
+            echo "✅ Using cached torrent metadata"
+            mkdir -p .temp
+            cp .temp/torrent_cache/parsed_files.txt .temp/
+            cp .temp/torrent_cache/file_list.txt .temp/ 2>/dev/null
+            cp .temp/torrent_cache/torrent.torrent .temp/
+            TORRENT_FILE=".temp/torrent.torrent"
+          else
+            if [[ "$TORRENT_INPUT" != magnet:* ]]; then
+              echo "Downloading torrent file..."
+              wget -O ".temp/torrent.torrent" "$TORRENT_INPUT"
+              TORRENT_FILE=".temp/torrent.torrent"
+            else
+              echo "Getting magnet link metadata..."
+              aria2c --show-files=true \
+                     --dir=".temp" \
+                     --bt-save-metadata=true \
+                     --bt-metadata-only=true \
+                     "$TORRENT_INPUT" 2>&1
+              TORRENT_FILE=$(find ".temp" -name "*.torrent" 2>/dev/null | head -n1)
+            fi
+            
+            if [ -f "$TORRENT_FILE" ]; then
+              aria2c --show-files=true "$TORRENT_FILE" 2>&1 | grep -E '^[[:space:]]*[0-9]+\|' > ".temp/file_list.txt"
+              
+              INDEX=1
+              > ".temp/parsed_files.txt"
+              while IFS='|' read -r idx size path; do
+                idx=$(echo "$idx" | xargs)
+                size=$(echo "$size" | xargs)
+                path=$(echo "$path" | xargs)
+                [ -z "$path" ] && continue
+                echo "${INDEX}|${idx}|${size}|${path}" >> ".temp/parsed_files.txt"
+                INDEX=$((INDEX + 1))
+              done < ".temp/file_list.txt"
+              
+              # Save to cache
+              mkdir -p .temp/torrent_cache
+              cp .temp/parsed_files.txt .temp/file_list.txt .temp/torrent.torrent .temp/torrent_cache/ 2>/dev/null
+              echo "✅ Metadata cached for future runs"
+            fi
+          fi
+          
+          if [ -f "$TORRENT_FILE" ]; then
+            echo ""
+            echo "📋 Files available in torrent:"
+            echo "================================"
+            
+            while IFS='|' read -r index idx size path; do
+              if command -v numfmt &> /dev/null; then
+                SIZE_HUMAN=$(numfmt --to=iec "$size" 2>/dev/null)
+              else
+                SIZE_HUMAN="$size bytes"
+              fi
+              echo "[${index}] ${path} (${SIZE_HUMAN})"
+            done < ".temp/parsed_files.txt"
+            
+            TOTAL=$(wc -l < ".temp/parsed_files.txt")
+            echo "================================"
+            echo "Total files: $TOTAL"
+            echo "torrent_file=${TORRENT_FILE}" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Could not retrieve torrent metadata"
+          fi
+      
+      - name: Show torrent info only
+        if: github.event.inputs.mode == 'Torrent - Show Info Only'
+        run: |
+          TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          mkdir -p "history/${TIMESTAMP}"
+          
+          cat > "history/${TIMESTAMP}/torrent_info.md" << EOF
+          # 📋 Torrent Contents
+          
+          **Date:** ${TEHRAN_TIME} (Tehran Time)
+          
+          **Torrent/Magnet:**
+          \`\`\`
+          ${{ github.event.inputs.url }}
+          \`\`\`
+          
+          **Files:**
+          
+          | # | File | Size |
+          |---|------|------|
+          EOF
+          
+          if [ -f ".temp/parsed_files.txt" ]; then
+            while IFS='|' read -r display_idx aria2_idx size path; do
+              if command -v numfmt &> /dev/null; then
+                SIZE_HUMAN=$(numfmt --to=iec "$size" 2>/dev/null)
+              else
+                SIZE_HUMAN="$size bytes"
+              fi
+              echo "| ${display_idx} | \`${path}\` | ${SIZE_HUMAN} |" >> "history/${TIMESTAMP}/torrent_info.md"
+            done < ".temp/parsed_files.txt"
+          fi
+          
+          echo "" >> "history/${TIMESTAMP}/torrent_info.md"
+          echo "> 💡 **To download:** Run workflow again with download mode" >> "history/${TIMESTAMP}/torrent_info.md"
+          
+          if [ -f "history/README.md" ]; then
+            python3 -c "
+          content = open('history/README.md').read()
+          entry = '### 📋 ${TEHRAN_TIME} (Tehran) - [Torrent Info](${TIMESTAMP}/torrent_info.md)\n\n---\n\n'
+          if '## 📥 Download History' in content:
+              parts = content.split('## 📥 Download History', 1)
+              new_content = parts[0] + '## 📥 Download History\n\n' + entry + parts[1]
+          else:
+              new_content = content + '\n' + entry
+          open('history/README.md', 'w').write(new_content)
+          "
+          else
+            cat > "history/README.md" << EOF
+          # 📥 Torrent Download History
+          
+          All times in **Tehran timezone (IR)**.
+          
+          ## 📥 Download History
+          
+          ### 📋 ${TEHRAN_TIME} (Tehran) - [Torrent Info](${TIMESTAMP}/torrent_info.md)
+          
+          ---
+          EOF
+          fi
+          
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .gitattributes history/
+          git commit -m "📋 Torrent info: ${TIMESTAMP}" || echo "Nothing to commit"
+          git push
+      
+      - name: Determine files to download (Torrent)
+        if: contains(github.event.inputs.mode, 'Torrent') && github.event.inputs.mode != 'Torrent - Show Info Only'
+        id: file_selection
+        run: |
+          SELECT_FILES="${{ github.event.inputs.select_files }}"
+          FILE_PATTERN="${{ github.event.inputs.file_pattern }}"
+          
+          if [ -n "$SELECT_FILES" ] && [ -f ".temp/parsed_files.txt" ]; then
+            echo "Selecting files by index: $SELECT_FILES"
+            IFS=',' read -ra INDEXES <<< "$SELECT_FILES"
+            ARIA2_INDEXES=()
+            for i in "${INDEXES[@]}"; do
+              i=$(echo "$i" | xargs)
+              ARIA2_IDX=$(grep "^${i}|" ".temp/parsed_files.txt" | cut -d'|' -f2)
+              [ -n "$ARIA2_IDX" ] && ARIA2_INDEXES+=("$ARIA2_IDX")
+            done
+            if [ ${#ARIA2_INDEXES[@]} -gt 0 ]; then
+              echo "select_option=--select-file=$(IFS=','; echo "${ARIA2_INDEXES[*]}")" >> $GITHUB_OUTPUT
+            fi
+          elif [ -n "$FILE_PATTERN" ] && [ -f ".temp/parsed_files.txt" ]; then
+            echo "Selecting files by pattern: $FILE_PATTERN"
+            ARIA2_INDEXES=()
+            while IFS='|' read -r display_idx aria2_idx size path; do
+              if [[ "$path" == $FILE_PATTERN ]]; then
+                ARIA2_INDEXES+=("$aria2_idx")
+              fi
+            done < ".temp/parsed_files.txt"
+            if [ ${#ARIA2_INDEXES[@]} -gt 0 ]; then
+              echo "select_option=--select-file=$(IFS=','; echo "${ARIA2_INDEXES[*]}")" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "Downloading ALL files"
+          fi
+      
+      - name: Download files
+        if: github.event.inputs.mode != 'Torrent - Show Info Only'
+        id: download
+        run: |
+          echo "==========================================="
+          echo "STARTING DOWNLOAD"
+          echo "Mode: ${{ github.event.inputs.mode }}"
+          echo "Status: ${{ steps.check_existing.outputs.status }}"
+          echo "==========================================="
+          
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          MODE="${{ github.event.inputs.mode }}"
+          CLEAN_NAME="${{ steps.check_existing.outputs.clean_name }}"
+          
+          # Use existing directory if resuming, otherwise create new
+          if [ "${{ steps.check_existing.outputs.status }}" = "resuming" ]; then
+            DOWNLOAD_DIR="${{ steps.check_existing.outputs.existing_dir }}"
+            TIMESTAMP="${{ steps.check_existing.outputs.existing_timestamp }}"
+            echo "📁 Resuming in existing directory: $DOWNLOAD_DIR"
+            
+            # Make sure the directory exists locally
+            mkdir -p "$DOWNLOAD_DIR"
+          else
+            DOWNLOAD_DIR="downloads/${TIMESTAMP}_${CLEAN_NAME}"
+            mkdir -p "$DOWNLOAD_DIR"
+            echo "📁 New download directory: $DOWNLOAD_DIR"
+          fi
+          
+          if [[ "$MODE" == "Direct Download" ]]; then
+            echo "Downloading direct file..."
+            aria2c --max-connection-per-server=${{ github.event.inputs.max_connections }} \
+                   --split=${{ github.event.inputs.max_connections }} \
+                   --dir="$DOWNLOAD_DIR" \
+                   --out="${CLEAN_NAME}" \
+                   --allow-overwrite=false \
+                   --auto-file-renaming=false \
+                   --continue=true \
+                   --file-allocation=none \
+                   "${{ github.event.inputs.url }}"
+          else
+            if [[ "${{ github.event.inputs.url }}" == magnet:* ]]; then
+              ARIA2_INPUT="${{ github.event.inputs.url }}"
+            else
+              wget -O "${DOWNLOAD_DIR}/torrent.torrent" "${{ github.event.inputs.url }}"
+              ARIA2_INPUT="${DOWNLOAD_DIR}/torrent.torrent"
+            fi
+            
+            if [[ "$MODE" == "Torrent - Preserve Structure" ]] || [[ "$MODE" == "Torrent - Zip Entire Folder" ]]; then
+              STRUCTURE_OPTION="--bt-preserve-tree=true"
+            else
+              STRUCTURE_OPTION=""
+            fi
+            
+            echo "Running aria2c for torrent..."
+            aria2c --seed-time=0 \
+                   --max-connection-per-server=${{ github.event.inputs.max_connections }} \
+                   --split=${{ github.event.inputs.max_connections }} \
+                   --dir="$DOWNLOAD_DIR" \
+                   --allow-overwrite=false \
+                   --auto-file-renaming=false \
+                   --continue=true \
+                   --file-allocation=none \
+                   --console-log-level=notice \
+                   $STRUCTURE_OPTION \
+                   ${{ steps.file_selection.outputs.select_option }} \
+                   "$ARIA2_INPUT"
+            
+            rm -f "${DOWNLOAD_DIR}/torrent.torrent" "${DOWNLOAD_DIR}"/*.aria2
+          fi
+          
+          echo "Download exit code: $?"
+          
+          echo ""
+          echo "Downloaded files:"
+          find "$DOWNLOAD_DIR" -type f -exec ls -lh {} \;
+          
+          echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
+          echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
+      
+      - name: Zip entire folder (Torrent - Zip Folder mode)
+        if: github.event.inputs.mode == 'Torrent - Zip Entire Folder'
+        run: |
+          DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
+          cd "$DOWNLOAD_DIR"
+          
+          MAIN_FOLDER=$(find . -maxdepth 1 -type d ! -name '.' ! -name '*.parts' | head -n1)
+          
+          if [ -n "$MAIN_FOLDER" ]; then
+            FOLDER_NAME=$(basename "$MAIN_FOLDER")
+            echo "Zipping entire folder: $FOLDER_NAME"
+            
+            if [ -f "${FOLDER_NAME}.zip" ] || ls "${FOLDER_NAME}.zip".* >/dev/null 2>&1; then
+              echo "⚠️ Zip already exists, skipping"
+            else
+              7z a -tzip -mx0 "${FOLDER_NAME}.zip" "$MAIN_FOLDER"
+              if [ $? -eq 0 ]; then
+                echo "✅ Folder zipped successfully"
+                rm -rf "$MAIN_FOLDER"
+              fi
+            fi
+          else
+            echo "No subfolder found, zipping all files..."
+            FOLDER_NAME="archive"
+            if [ ! -f "${FOLDER_NAME}.zip" ] && ! ls "${FOLDER_NAME}.zip".* >/dev/null 2>&1; then
+              7z a -tzip -mx0 "${FOLDER_NAME}.zip" *
+              if [ $? -eq 0 ]; then
+                find . -type f ! -name "*.zip" ! -name "*.zip.*" -delete
+              fi
+            fi
+          fi
+      
+      - name: Split large files
+        if: github.event.inputs.mode != 'Torrent - Show Info Only'
+        run: |
+          DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
+          SPLIT_SIZE_MB="${{ github.event.inputs.split_size }}"
+          SPLIT_SIZE=$((SPLIT_SIZE_MB * 1048576))
+          
+          echo "Checking for files larger than ${SPLIT_SIZE_MB}MB..."
+          
+          find "$DOWNLOAD_DIR" -type f ! -name "*.torrent" ! -name "*.aria2" ! -name "*.7z.*" -print0 | while IFS= read -r -d '' file; do
+            FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
+            
+            BASENAME=$(basename "$file")
+            DIRNAME=$(dirname "$file")
+            
+            # Skip if already split
+            if ls "${DIRNAME}/${BASENAME}.7z."* >/dev/null 2>&1; then
+              echo "⏭️ Already split: $BASENAME"
+              continue
+            fi
+            
+            if [ "$FILE_SIZE" -gt "$SPLIT_SIZE" ]; then
+              echo "Splitting: $BASENAME ($(echo "$FILE_SIZE" | numfmt --to=iec 2>/dev/null || echo "${FILE_SIZE} bytes"))"
+              
+              7z a -v${SPLIT_SIZE_MB}m -mx0 "${DIRNAME}/${BASENAME}.7z" "$file"
+              
+              if [ $? -eq 0 ]; then
+                echo "  ✓ Split successful, removing original"
+                rm "$file"
+              else
+                echo "  ✗ Split failed, keeping original"
+              fi
+            fi
+          done
+          
+          echo ""
+          echo "Files after splitting:"
+          find "$DOWNLOAD_DIR" -type f -exec ls -lh {} \;
+      
+      - name: Generate report
+        if: github.event.inputs.mode != 'Torrent - Show Info Only'
+        run: |
+          DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
+          TIMESTAMP="${{ steps.download.outputs.timestamp }}"
+          REPORT_DIR="history/${TIMESTAMP}"
+          mkdir -p "$REPORT_DIR"
+          
+          cat > "${REPORT_DIR}/manifest.json" << EOF
+          {
+            "timestamp": "${TIMESTAMP}",
+            "url": "${{ github.event.inputs.url }}",
+            "mode": "${{ github.event.inputs.mode }}",
+            "download_date": "$(date -u +"%Y-%m-%d %H:%M:%S UTC")",
+            "download_dir": "${DOWNLOAD_DIR}",
+            "files": [
+          EOF
+          
+          FIRST=true
+          find "$DOWNLOAD_DIR" -type f ! -name "*.torrent" ! -name "*.aria2" -print0 | sort -z | while IFS= read -r -d '' file; do
+            REL_PATH="${file#$DOWNLOAD_DIR/}"
+            FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
+            FILE_HASH=$(sha256sum "$file" | cut -d' ' -f1)
+            SIZE_HUMAN=$(echo "$FILE_SIZE" | numfmt --to=iec 2>/dev/null || echo "${FILE_SIZE} bytes")
+            
+            if [ "$FIRST" = false ]; then
+              echo "," >> "${REPORT_DIR}/manifest.json"
+            fi
+            FIRST=false
+            
+            cat >> "${REPORT_DIR}/manifest.json" << EOF
+              {"path": "${REL_PATH}", "size": ${FILE_SIZE}, "size_human": "${SIZE_HUMAN}", "sha256": "${FILE_HASH}"}
+          EOF
+          done
+          
+          echo "" >> "${REPORT_DIR}/manifest.json"
+          echo "  ]" >> "${REPORT_DIR}/manifest.json"
+          echo "}" >> "${REPORT_DIR}/manifest.json"
+          
+          echo "Report generated at ${REPORT_DIR}/manifest.json"
+      
+      - name: Update history
+        if: github.event.inputs.mode != 'Torrent - Show Info Only'
+        run: |
+          TIMESTAMP="${{ steps.download.outputs.timestamp }}"
+          DOWNLOAD_URL="${{ github.event.inputs.url }}"
+          REPO="${{ github.repository }}"
+          BRANCH="${{ github.ref_name }}"
+          DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
+          MODE="${{ github.event.inputs.mode }}"
+          
+          MANIFEST_FILE="history/${TIMESTAMP}/manifest.json"
+          HISTORY_README="history/README.md"
+          LINKS_FILE="history/${TIMESTAMP}/links.txt"
+          TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
+          
+          echo "Updating history..."
+          
+          cat > /tmp/update_history.py << 'PYEOF'
+          import json
+          import urllib.parse
+          import os
+          import re
+          from collections import defaultdict
+          
+          manifest_file = os.environ['MANIFEST_FILE']
+          repo = os.environ['REPO']
+          branch = os.environ['BRANCH']
+          download_dir = os.environ['DOWNLOAD_DIR']
+          download_url = os.environ['DOWNLOAD_URL']
+          mode = os.environ['MODE']
+          tehran_time = os.environ['TEHRAN_TIME']
+          history_readme = os.environ['HISTORY_README']
+          links_file = os.environ['LINKS_FILE']
+          
+          with open(manifest_file) as f:
+              manifest = json.load(f)
+          
+          normal_files = []
+          split_groups = defaultdict(list)
+          
+          for file_info in manifest['files']:
+              path = file_info['path']
+              match = re.match(r'(.+)\.7z\.(\d{3})$', path)
+              if match:
+                  base_name = match.group(1)
+                  split_groups[base_name].append(file_info)
+              else:
+                  normal_files.append(file_info)
+          
+          icons = {
+              'zip': '🗜️', 'rar': '📚', '7z': '📦',
+              'mkv': '🎬', 'mp4': '🎬', 'avi': '🎬', 'mov': '🎬', 'webm': '🎬',
+              'mp3': '🎵', 'flac': '🎵', 'ogg': '🎵', 'm4a': '🎵', 'wav': '🎵',
+              'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'webp': '🖼️',
+              'pdf': '📕', 'epub': '📗', 'mobi': '📘',
+              'txt': '📄', 'srt': '💬', 'sub': '💬', 'ass': '💬',
+              'exe': '⚙️', 'apk': '📱',
+          }
+          
+          def get_icon(path):
+              ext = path.lower().split('.')[-1] if '.' in path else ''
+              return icons.get(ext, '📄')
+          
+          def make_link(path):
+              encoded = urllib.parse.quote(path, safe='')
+              full_path = f"{download_dir}/{encoded}"
+              return f"https://raw.githubusercontent.com/{repo}/{branch}/{full_path}"
+          
+          all_links = []
+          lines = []
+          lines.append(f"### 📅 {tehran_time} (Tehran)")
+          lines.append("")
+          lines.append(f"**Mode:** {mode}")
+          lines.append("")
+          lines.append("**Source:**")
+          lines.append("```")
+          lines.append(download_url)
+          lines.append("```")
+          lines.append("")
+          lines.append("**Files:**")
+          lines.append("")
+          
+          for file_info in normal_files:
+              path = file_info['path']
+              size = file_info['size_human']
+              icon = get_icon(path)
+              link = make_link(path)
+              all_links.append(link)
+              lines.append(f"- {icon} [**{path}**]({link}) - {size}")
+          
+          for base_name, parts in sorted(split_groups.items()):
+              parts.sort(key=lambda x: x['path'])
+              
+              total_size = sum(p['size'] for p in parts)
+              if total_size >= 1073741824:
+                  total_human = f"{total_size/1073741824:.2f}GB"
+              elif total_size >= 1048576:
+                  total_human = f"{total_size/1048576:.1f}MB"
+              elif total_size >= 1024:
+                  total_human = f"{total_size//1024}KB"
+              else:
+                  total_human = f"{total_size}B"
+              
+              lines.append("")
+              lines.append(f"- 📦 **{base_name}.7z** (Split Archive - {total_human} total)")
+              
+              total_parts = len(parts)
+              for i, part in enumerate(parts):
+                  path = part['path']
+                  size = part['size_human']
+                  link = make_link(path)
+                  all_links.append(link)
+                  if i == total_parts - 1:
+                      prefix = "  └─"
+                  else:
+                      prefix = "  ├─"
+                  lines.append(f"{prefix} 📎 [**{path}**]({link}) - {size}")
+              
+              first_part = parts[0]['path']
+              tip = "  💡 *Download all parts, then:* "
+              tip += "`7z x " + first_part + "`"
+              lines.append(tip)
+          
+          lines.append("")
+          lines.append(f"[📋 Download All Links]({os.path.basename(links_file)})")
+          lines.append("")
+          lines.append("---")
+          lines.append("")
+          
+          entry = "\n".join(lines)
+          
+          with open(links_file, 'w') as f:
+              f.write("\n".join(all_links))
+              f.write("\n")
+          
+          if os.path.exists(history_readme):
+              with open(history_readme) as f:
+                  content = f.read()
+              
+              if f"downloads/{os.path.basename(download_dir)}" in content:
+                  print("⚠️ Entry already exists, replacing...")
+                  pattern = r"### 📅.*?\n---\n"
+                  matches = list(re.finditer(pattern, content, re.DOTALL))
+                  for m in matches:
+                      if f"downloads/{os.path.basename(download_dir)}" in m.group():
+                          content = content.replace(m.group(), '')
+                          break
+              
+              marker = '## 📥 Download History'
+              if marker in content:
+                  parts = content.split(marker, 1)
+                  new_content = parts[0] + marker + '\n\n' + entry + parts[1]
+              else:
+                  new_content = content + '\n' + entry
+          else:
+              new_content = f"""# 📥 Torrent Download History
 
-- name: Determine files to download (Torrent)
-  if: contains(github.event.inputs.mode, 'Torrent') && github.event.inputs.mode != 'Torrent - Show Info Only'
-  id: file_selection
-  run: |
-    SELECT_FILES="${{ github.event.inputs.select_files }}"
-    FILE_PATTERN="${{ github.event.inputs.file_pattern }}"
-    
-    if [ -n "$SELECT_FILES" ] && [ -f ".temp/parsed_files.txt" ]; then
-      echo "Selecting files by index: $SELECT_FILES"
-      IFS=',' read -ra INDEXES <<< "$SELECT_FILES"
-      ARIA2_INDEXES=()
-      for i in "${INDEXES[@]}"; do
-        i=$(echo "$i" | xargs)
-        ARIA2_IDX=$(grep "^${i}|" ".temp/parsed_files.txt" | cut -d'|' -f2)
-        [ -n "$ARIA2_IDX" ] && ARIA2_INDEXES+=("$ARIA2_IDX")
-      done
-      if [ ${#ARIA2_INDEXES[@]} -gt 0 ]; then
-        echo "select_option=--select-file=$(IFS=','; echo "${ARIA2_INDEXES[*]}")" >> $GITHUB_OUTPUT
-      fi
-    elif [ -n "$FILE_PATTERN" ] && [ -f ".temp/parsed_files.txt" ]; then
-      echo "Selecting files by pattern: $FILE_PATTERN"
-      ARIA2_INDEXES=()
-      while IFS='|' read -r display_idx aria2_idx size path; do
-        if [[ "$path" == $FILE_PATTERN ]]; then
-          ARIA2_INDEXES+=("$aria2_idx")
-        fi
-      done < ".temp/parsed_files.txt"
-      if [ ${#ARIA2_INDEXES[@]} -gt 0 ]; then
-        echo "select_option=--select-file=$(IFS=','; echo "${ARIA2_INDEXES[*]}")" >> $GITHUB_OUTPUT
-      fi
-    else
-      echo "Downloading ALL files"
-    fi
+          All times in **Tehran timezone (IR)**.
 
-- name: Download files
-  if: github.event.inputs.mode != 'Torrent - Show Info Only'
-  id: download
-  run: |
-    echo "==========================================="
-    echo "STARTING DOWNLOAD"
-    echo "Mode: ${{ github.event.inputs.mode }}"
-    echo "Status: ${{ steps.check_existing.outputs.status }}"
-    echo "==========================================="
-    
-    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-    MODE="${{ github.event.inputs.mode }}"
-    CLEAN_NAME="${{ steps.check_existing.outputs.clean_name }}"
-    
-    if [ "${{ steps.check_existing.outputs.status }}" = "resuming" ]; then
-      DOWNLOAD_DIR="${{ steps.check_existing.outputs.existing_dir }}"
-      TIMESTAMP="${{ steps.check_existing.outputs.existing_timestamp }}"
-      echo "📁 Resuming in existing directory: $DOWNLOAD_DIR"
-      mkdir -p "$DOWNLOAD_DIR"
-    else
-      DOWNLOAD_DIR="downloads/${TIMESTAMP}_${CLEAN_NAME}"
-      mkdir -p "$DOWNLOAD_DIR"
-      echo "📁 New download directory: $DOWNLOAD_DIR"
-    fi
-    
-    if [[ "$MODE" == "Direct Download" ]]; then
-      echo "Downloading direct file..."
-      aria2c --max-connection-per-server=${{ github.event.inputs.max_connections }} \
-             --split=${{ github.event.inputs.max_connections }} \
-             --dir="$DOWNLOAD_DIR" \
-             --out="${CLEAN_NAME}" \
-             --allow-overwrite=false \
-             --auto-file-renaming=false \
-             --continue=true \
-             --file-allocation=none \
-             "${{ github.event.inputs.url }}"
-    else
-      if [[ "${{ github.event.inputs.url }}" == magnet:* ]]; then
-        ARIA2_INPUT="${{ github.event.inputs.url }}"
-      else
-        wget -O "${DOWNLOAD_DIR}/torrent.torrent" "${{ github.event.inputs.url }}"
-        ARIA2_INPUT="${DOWNLOAD_DIR}/torrent.torrent"
-      fi
-      
-      if [[ "$MODE" == "Torrent - Preserve Structure" ]] || [[ "$MODE" == "Torrent - Zip Entire Folder" ]]; then
-        STRUCTURE_OPTION="--bt-preserve-tree=true"
-      else
-        STRUCTURE_OPTION=""
-      fi
-      
-      echo "Running aria2c for torrent..."
-      aria2c --seed-time=0 \
-             --max-connection-per-server=${{ github.event.inputs.max_connections }} \
-             --split=${{ github.event.inputs.max_connections }} \
-             --dir="$DOWNLOAD_DIR" \
-             --allow-overwrite=false \
-             --auto-file-renaming=false \
-             --continue=true \
-             --file-allocation=none \
-             --console-log-level=notice \
-             $STRUCTURE_OPTION \
-             ${{ steps.file_selection.outputs.select_option }} \
-             "$ARIA2_INPUT"
-      
-      rm -f "${DOWNLOAD_DIR}/torrent.torrent" "${DOWNLOAD_DIR}"/*.aria2
-    fi
-    
-    echo "Download exit code: $?"
-    echo ""
-    echo "Downloaded files:"
-    find "$DOWNLOAD_DIR" -type f -exec ls -lh {} \;
-    
-    echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
-    echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
-- name: Zip entire folder (Torrent - Zip Folder mode)
-  if: github.event.inputs.mode == 'Torrent - Zip Entire Folder'
-  run: |
-    DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
-    cd "$DOWNLOAD_DIR"
-    
-    MAIN_FOLDER=$(find . -maxdepth 1 -type d ! -name '.' ! -name '*.parts' | head -n1)
-    
-    if [ -n "$MAIN_FOLDER" ]; then
-      FOLDER_NAME=$(basename "$MAIN_FOLDER")
-      echo "Zipping entire folder: $FOLDER_NAME"
-      
-      if [ -f "${FOLDER_NAME}.zip" ] || ls "${FOLDER_NAME}.zip".* >/dev/null 2>&1; then
-        echo "⚠️ Zip already exists, skipping"
-      else
-        7z a -tzip -mx0 "${FOLDER_NAME}.zip" "$MAIN_FOLDER"
-        if [ $? -eq 0 ]; then
-          echo "✅ Folder zipped successfully"
-          rm -rf "$MAIN_FOLDER"
-        fi
-      fi
-    else
-      echo "No subfolder found, zipping all files..."
-      FOLDER_NAME="archive"
-      if [ ! -f "${FOLDER_NAME}.zip" ] && ! ls "${FOLDER_NAME}.zip".* >/dev/null 2>&1; then
-        7z a -tzip -mx0 "${FOLDER_NAME}.zip" *
-        if [ $? -eq 0 ]; then
-          find . -type f ! -name "*.zip" ! -name "*.zip.*" -delete
-        fi
-      fi
-    fi
+          ## 📥 Download History
 
-- name: Split large files
-  if: github.event.inputs.mode != 'Torrent - Show Info Only'
-  run: |
-    DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
-    SPLIT_SIZE_MB="${{ github.event.inputs.split_size }}"
-    SPLIT_SIZE=$((SPLIT_SIZE_MB * 1048576))
-    
-    echo "Checking for files larger than ${SPLIT_SIZE_MB}MB..."
-    
-    find "$DOWNLOAD_DIR" -type f ! -name "*.torrent" ! -name "*.aria2" ! -name "*.7z.*" -print0 | while IFS= read -r -d '' file; do
-      FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
+          {entry}
+          """
+          
+          with open(history_readme, 'w') as f:
+              f.write(new_content)
+          
+          print("✅ History updated successfully!")
+          print(f"✅ Links saved to {links_file}")
+          PYEOF
+          
+          export MANIFEST_FILE="$MANIFEST_FILE"
+          export REPO="$REPO"
+          export BRANCH="$BRANCH"
+          export DOWNLOAD_DIR="$DOWNLOAD_DIR"
+          export DOWNLOAD_URL="$DOWNLOAD_URL"
+          export MODE="$MODE"
+          export TEHRAN_TIME="$TEHRAN_TIME"
+          export HISTORY_README="$HISTORY_README"
+          export LINKS_FILE="$LINKS_FILE"
+          
+          python3 /tmp/update_history.py
       
-      BASENAME=$(basename "$file")
-      DIRNAME=$(dirname "$file")
-      
-      if ls "${DIRNAME}/${BASENAME}.7z."* >/dev/null 2>&1; then
-        echo "⏭️ Already split: $BASENAME"
-        continue
-      fi
-      
-      if [ "$FILE_SIZE" -gt "$SPLIT_SIZE" ]; then
-        echo "Splitting: $BASENAME ($(echo "$FILE_SIZE" | numfmt --to=iec 2>/dev/null || echo "${FILE_SIZE} bytes"))"
-        
-        7z a -v${SPLIT_SIZE_MB}m -mx0 "${DIRNAME}/${BASENAME}.7z" "$file"
-        
-        if [ $? -eq 0 ]; then
-          echo "  ✓ Split successful, removing original"
-          rm "$file"
-        else
-          echo "  ✗ Split failed, keeping original"
-        fi
-      fi
-    done
-    
-    echo ""
-    echo "Files after splitting:"
-    find "$DOWNLOAD_DIR" -type f -exec ls -lh {} \;
-
-- name: Generate report
-  if: github.event.inputs.mode != 'Torrent - Show Info Only'
-  run: |
-    DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
-    TIMESTAMP="${{ steps.download.outputs.timestamp }}"
-    REPORT_DIR="history/${TIMESTAMP}"
-    mkdir -p "$REPORT_DIR"
-    
-    cat > "${REPORT_DIR}/manifest.json" << EOF
-    {
-      "timestamp": "${TIMESTAMP}",
-      "url": "${{ github.event.inputs.url }}",
-      "mode": "${{ github.event.inputs.mode }}",
-      "download_date": "$(date -u +"%Y-%m-%d %H:%M:%S UTC")",
-      "download_dir": "${DOWNLOAD_DIR}",
-      "files": [
-    EOF
-    
-    FIRST=true
-    find "$DOWNLOAD_DIR" -type f ! -name "*.torrent" ! -name "*.aria2" -print0 | sort -z | while IFS= read -r -d '' file; do
-      REL_PATH="${file#$DOWNLOAD_DIR/}"
-      FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
-      FILE_HASH=$(sha256sum "$file" | cut -d' ' -f1)
-      SIZE_HUMAN=$(echo "$FILE_SIZE" | numfmt --to=iec 2>/dev/null || echo "${FILE_SIZE} bytes")
-      
-      if [ "$FIRST" = false ]; then
-        echo "," >> "${REPORT_DIR}/manifest.json"
-      fi
-      FIRST=false
-      
-      cat >> "${REPORT_DIR}/manifest.json" << EOF
-        {"path": "${REL_PATH}", "size": ${FILE_SIZE}, "size_human": "${SIZE_HUMAN}", "sha256": "${FILE_HASH}"}
-    EOF
-    done
-    
-    echo "" >> "${REPORT_DIR}/manifest.json"
-    echo "  ]" >> "${REPORT_DIR}/manifest.json"
-    echo "}" >> "${REPORT_DIR}/manifest.json"
-    
-    echo "Report generated at ${REPORT_DIR}/manifest.json"
-
-- name: Update history
-  if: github.event.inputs.mode != 'Torrent - Show Info Only'
-  run: |
-    TIMESTAMP="${{ steps.download.outputs.timestamp }}"
-    DOWNLOAD_URL="${{ github.event.inputs.url }}"
-    REPO="${{ github.repository }}"
-    BRANCH="${{ github.ref_name }}"
-    DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
-    MODE="${{ github.event.inputs.mode }}"
-    
-    MANIFEST_FILE="history/${TIMESTAMP}/manifest.json"
-    HISTORY_README="history/README.md"
-    LINKS_FILE="history/${TIMESTAMP}/links.txt"
-    TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
-    
-    echo "Updating history..."
-    
-    cat > /tmp/update_history.py << 'PYEOF'
-    import json
-    import urllib.parse
-    import os
-    import re
-    from collections import defaultdict
-    
-    manifest_file = os.environ['MANIFEST_FILE']
-    repo = os.environ['REPO']
-    branch = os.environ['BRANCH']
-    download_dir = os.environ['DOWNLOAD_DIR']
-    download_url = os.environ['DOWNLOAD_URL']
-    mode = os.environ['MODE']
-    tehran_time = os.environ['TEHRAN_TIME']
-    history_readme = os.environ['HISTORY_README']
-    links_file = os.environ['LINKS_FILE']
-    
-    with open(manifest_file) as f:
-        manifest = json.load(f)
-    
-    normal_files = []
-    split_groups = defaultdict(list)
-    
-    for file_info in manifest['files']:
-        path = file_info['path']
-        match = re.match(r'(.+)\.7z\.(\d{3})$', path)
-        if match:
-            base_name = match.group(1)
-            split_groups[base_name].append(file_info)
-        else:
-            normal_files.append(file_info)
-    
-    icons = {
-        'zip': '🗜️', 'rar': '📚', '7z': '📦',
-        'mkv': '🎬', 'mp4': '🎬', 'avi': '🎬', 'mov': '🎬', 'webm': '🎬',
-        'mp3': '🎵', 'flac': '🎵', 'ogg': '🎵', 'm4a': '🎵', 'wav': '🎵',
-        'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'webp': '🖼️',
-        'pdf': '📕', 'epub': '📗', 'mobi': '📘',
-        'txt': '📄', 'srt': '💬', 'sub': '💬', 'ass': '💬',
-        'exe': '⚙️', 'apk': '📱',
-    }
-    
-    def get_icon(path):
-        ext = path.lower().split('.')[-1] if '.' in path else ''
-        return icons.get(ext, '📄')
-    
-    def make_link(path):
-        encoded = urllib.parse.quote(path, safe='')
-        full_path = f"{download_dir}/{encoded}"
-        return f"https://raw.githubusercontent.com/{repo}/{branch}/{full_path}"
-    
-    all_links = []
-    lines = []
-    lines.append(f"### 📅 {tehran_time} (Tehran)")
-    lines.append("")
-    lines.append(f"**Mode:** {mode}")
-    lines.append("")
-    lines.append("**Source:**")
-    lines.append("```")
-    lines.append(download_url)
-    lines.append("```")
-    lines.append("")
-    lines.append("**Files:**")
-    lines.append("")
-    
-    for file_info in normal_files:
-        path = file_info['path']
-        size = file_info['size_human']
-        icon = get_icon(path)
-        link = make_link(path)
-        all_links.append(link)
-        lines.append(f"- {icon} [**{path}**]({link}) - {size}")
-    
-    for base_name, parts in sorted(split_groups.items()):
-        parts.sort(key=lambda x: x['path'])
-        
-        total_size = sum(p['size'] for p in parts)
-        if total_size >= 1073741824:
-            total_human = f"{total_size/1073741824:.2f}GB"
-        elif total_size >= 1048576:
-            total_human = f"{total_size/1048576:.1f}MB"
-        elif total_size >= 1024:
-            total_human = f"{total_size//1024}KB"
-        else:
-            total_human = f"{total_size}B"
-        
-        lines.append("")
-        lines.append(f"- 📦 **{base_name}.7z** (Split Archive - {total_human} total)")
-        
-        total_parts = len(parts)
-        for i, part in enumerate(parts):
-            path = part['path']
-            size = part['size_human']
-            link = make_link(path)
-            all_links.append(link)
-            if i == total_parts - 1:
-                prefix = "  └─"
-            else:
-                prefix = "  ├─"
-            lines.append(f"{prefix} 📎 [**{path}**]({link}) - {size}")
-        
-        first_part = parts[0]['path']
-        tip = "  💡 *Download all parts, then:* "
-        tip += "`7z x " + first_part + "`"
-        lines.append(tip)
-    
-    lines.append("")
-    lines.append(f"[📋 Download All Links]({os.path.basename(links_file)})")
-    lines.append("")
-    lines.append("---")
-    lines.append("")
-    
-    entry = "\n".join(lines)
-    
-    with open(links_file, 'w') as f:
-        f.write("\n".join(all_links))
-        f.write("\n")
-    
-    if os.path.exists(history_readme):
-        with open(history_readme) as f:
-            content = f.read()
-        
-        if f"downloads/{os.path.basename(download_dir)}" in content:
-            print("⚠️ Entry already exists, replacing...")
-            pattern = r"### 📅.*?\n---\n"
-            matches = list(re.finditer(pattern, content, re.DOTALL))
-            for m in matches:
-                if f"downloads/{os.path.basename(download_dir)}" in m.group():
-                    content = content.replace(m.group(), '')
-                    break
-        
-        marker = '## 📥 Download History'
-        if marker in content:
-            parts = content.split(marker, 1)
-            new_content = parts[0] + marker + '\n\n' + entry + parts[1]
-        else:
-            new_content = content + '\n' + entry
-    else:
-        new_content = f"""# 📥 Torrent Download History
-
-    All times in **Tehran timezone (IR)**.
-
-    ## 📥 Download History
-
-    {entry}
-    """
-    
-    with open(history_readme, 'w') as f:
-        f.write(new_content)
-    
-    print("✅ History updated successfully!")
-    print(f"✅ Links saved to {links_file}")
-    PYEOF
-    
-    export MANIFEST_FILE="$MANIFEST_FILE"
-    export REPO="$REPO"
-    export BRANCH="$BRANCH"
-    export DOWNLOAD_DIR="$DOWNLOAD_DIR"
-    export DOWNLOAD_URL="$DOWNLOAD_URL"
-    export MODE="$MODE"
-    export TEHRAN_TIME="$TEHRAN_TIME"
-    export HISTORY_README="$HISTORY_README"
-    export LINKS_FILE="$LINKS_FILE"
-    
-    python3 /tmp/update_history.py
-
-- name: Commit and push changes
-  if: github.event.inputs.mode != 'Torrent - Show Info Only'
-  run: |
-    git config --local user.email "action@github.com"
-    git config --local user.name "GitHub Action"
-    
-    rm -rf .temp
-    
-    if ! git diff --quiet .gitattributes; then
-      git add .gitattributes
-      git commit -m "🔧 Update git attributes" || true
-    fi
-    
-    DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
-    BATCH_SIZE_MB=500
-    
-    echo "📦 Preparing batched commits (${BATCH_SIZE_MB}MB per batch)..."
-    
-    NEW_FILES=$(git ls-files --others --exclude-standard "$DOWNLOAD_DIR" 2>/dev/null)
-    MODIFIED_FILES=$(git diff --name-only "$DOWNLOAD_DIR" 2>/dev/null)
-    ALL_FILES=$(echo -e "$NEW_FILES\n$MODIFIED_FILES" | sort -u | grep -v '^$')
-    
-    if [ -z "$ALL_FILES" ]; then
-      echo "No new files to commit"
-    else
-      CURRENT_BATCH_SIZE=0
-      BATCH_NUM=1
-      BATCH_FILES=""
-      
-      while IFS= read -r file; do
-        [ -z "$file" ] && continue
-        
-        if [ -f "$file" ]; then
-          FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
-          FILE_SIZE_MB=$((FILE_SIZE / 1048576))
-        else
-          FILE_SIZE_MB=0
-        fi
-        
-        if [ $((CURRENT_BATCH_SIZE + FILE_SIZE_MB)) -gt $BATCH_SIZE_MB ] && [ -n "$BATCH_FILES" ]; then
-          echo "📤 Pushing batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
-          git add $BATCH_FILES
-          git commit -m "📥 Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || true
+      # ============================================
+      # STEP 13: Batched commits
+      # ============================================
+      - name: Commit and push changes
+        if: github.event.inputs.mode != 'Torrent - Show Info Only'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          rm -rf .temp
+          
+          # Push .gitattributes if changed
+          if ! git diff --quiet .gitattributes; then
+            git add .gitattributes
+            git commit -m "🔧 Update git attributes" || true
+          fi
+          
+          # Batch downloads into 500MB chunks
+          DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
+          BATCH_SIZE_MB=500
+          
+          echo "📦 Preparing batched commits (${BATCH_SIZE_MB}MB per batch)..."
+          
+          # Collect all new/modified files
+          NEW_FILES=$(git ls-files --others --exclude-standard "$DOWNLOAD_DIR" 2>/dev/null)
+          MODIFIED_FILES=$(git diff --name-only "$DOWNLOAD_DIR" 2>/dev/null)
+          ALL_FILES=$(echo -e "$NEW_FILES\n$MODIFIED_FILES" | sort -u | grep -v '^$')
+          
+          if [ -z "$ALL_FILES" ]; then
+            echo "No new files to commit"
+          else
+            CURRENT_BATCH_SIZE=0
+            BATCH_NUM=1
+            BATCH_FILES=""
+            
+            while IFS= read -r file; do
+              [ -z "$file" ] && continue
+              
+              if [ -f "$file" ]; then
+                FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
+                FILE_SIZE_MB=$((FILE_SIZE / 1048576))
+              else
+                FILE_SIZE_MB=0
+              fi
+              
+              if [ $((CURRENT_BATCH_SIZE + FILE_SIZE_MB)) -gt $BATCH_SIZE_MB ] && [ -n "$BATCH_FILES" ]; then
+                echo "📤 Pushing batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
+                git add $BATCH_FILES
+                git commit -m "📥 Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || true
+                git push
+                
+                BATCH_NUM=$((BATCH_NUM + 1))
+                CURRENT_BATCH_SIZE=0
+                BATCH_FILES=""
+              fi
+              
+              BATCH_FILES="$BATCH_FILES $file"
+              CURRENT_BATCH_SIZE=$((CURRENT_BATCH_SIZE + FILE_SIZE_MB))
+            done <<< "$ALL_FILES"
+            
+            # Push remaining
+            if [ -n "$BATCH_FILES" ]; then
+              echo "📤 Pushing final batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
+              git add $BATCH_FILES
+              git commit -m "📥 Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || true
+              git push
+            fi
+          fi
+          
+          # Push history separately
+          echo "📤 Pushing history"
+          git add history/
+          git commit -m "📋 Update history: ${{ steps.download.outputs.timestamp }}" || echo "Nothing to commit"
           git push
           
-          BATCH_NUM=$((BATCH_NUM + 1))
-          CURRENT_BATCH_SIZE=0
-          BATCH_FILES=""
-        fi
-        
-        BATCH_FILES="$BATCH_FILES $file"
-        CURRENT_BATCH_SIZE=$((CURRENT_BATCH_SIZE + FILE_SIZE_MB))
-      done <<< "$ALL_FILES"
-      
-      if [ -n "$BATCH_FILES" ]; then
-        echo "📤 Pushing final batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
-        git add $BATCH_FILES
-        git commit -m "📥 Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || true
-        git push
-      fi
-    fi
-    
-    echo "📤 Pushing history"
-    git add history/
-    git commit -m "📋 Update history: ${{ steps.download.outputs.timestamp }}" || echo "Nothing to commit"
-    git push
-    
-    echo "==========================================="
-    echo "✅ DONE! View history at:"
-    echo "https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/history/README.md"
-    echo "==========================================="
+          echo "==========================================="
+          echo "✅ DONE! View history at:"
+          echo "https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/history/README.md"
+          echo "==========================================="
