@@ -82,11 +82,11 @@ Keep Last 3/5 Downloads - Remove older downloads
 
 ## ⚠️ Limits   -----     Limit	Value
 -----------------------------------------------------
-Individual file size	100 MB (files split at 95MB)
+Individual file size -->	100 MB (files split at 95MB)
 -----------------------------------------------------
-Push size	2 GB (handled by 500MB batch commits)
+Push size -->	2 GB (handled by 500MB batch commits)
 -----------------------------------------------------
-Artifact retention	90 days (10GB MAX)
+Artifact retention -->	90 days (10GB MAX)
 -----------------------------------------------------
+Workflow timeout -->	6 hours
 -----------------------------------------------------
-Workflow timeout	6 hours
