@@ -50,8 +50,9 @@ A GitHub Actions-powered downloader that supports torrents, magnets, and direct 
 
 5. Click **Run workflow**
 
-## Artifact
-You can send the Artifact link to https://urldl.ir/ 
+## Artifacts
+
+You can send the Artifact link to https://urldl.ir/.
 if you forgot to copy the artifact link in the workflow or you just want to copy it again 
 1. Go to the **Actions** tab
 2. Select **Torrent Downloader**
