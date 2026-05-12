@@ -487,7 +487,7 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           rm -rf .temp
-          git sparse-checkout add downloads/
+          git sparse-checkout add "${{ steps.download.outputs.download_dir }}"
           
           # Commit history first
           git add .github/ history/
