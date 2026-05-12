@@ -11,11 +11,8 @@ on:
           - 'Clean Everything'
           - 'Clean Downloads Only'
           - 'Clean History Only'
-          - 'Clean Old Downloads (Keep Last 3)'
-      confirm:
-        description: 'Type "DELETE" to confirm'
-        required: true
-        type: string
+          - 'Keep Last 3 Downloads'
+          - 'Keep Last 5 Downloads'
 
 permissions:
   contents: write
@@ -23,197 +20,86 @@ permissions:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
-    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-      
-      - name: Verify confirmation
-        run: |
-          if [ "${{ github.event.inputs.confirm }}" != "DELETE" ]; then
-            echo "❌ You must type 'DELETE' in the confirm field to proceed."
-            echo "You entered: '${{ github.event.inputs.confirm }}'"
-            exit 1
-          fi
-          echo "✅ Confirmation verified"
-      
+          fetch-depth: 1
+          sparse-checkout: |
+            downloads/
+            history/
+          sparse-checkout-cone-mode: false
+
       - name: Clean Everything
         if: github.event.inputs.target == 'Clean Everything'
         run: |
-          echo "🗑️ Cleaning everything..."
-          
-          # Remove downloads
-          if [ -d "downloads" ]; then
-            rm -rf downloads
-            mkdir -p downloads
-            touch downloads/.gitkeep
-            echo "✅ Downloads folder cleaned"
-          fi
-          
-          # Remove history
-          if [ -d "history" ]; then
-            rm -rf history
-            mkdir -p history
-            echo "✅ History folder cleaned"
-          fi
-          
-          # Remove temp files
-          rm -rf .temp
-          
-          TOTAL_REMOVED=$(git diff --name-only --diff-filter=D | wc -l)
-          echo "Total files removed: $TOTAL_REMOVED"
-      
+          echo "Cleaning everything..."
+          rm -rf downloads history
+          mkdir -p downloads history
+          touch downloads/.gitkeep
+          echo "Done."
+
       - name: Clean Downloads Only
         if: github.event.inputs.target == 'Clean Downloads Only'
         run: |
-          echo "🗑️ Cleaning downloads folder..."
-          
-          if [ -d "downloads" ]; then
-            # Count files before removing
-            FILE_COUNT=$(find downloads -type f ! -name '.gitkeep' | wc -l)
-            TOTAL_SIZE=$(du -sh downloads 2>/dev/null | cut -f1)
-            
-            echo "Removing $FILE_COUNT files ($TOTAL_SIZE)"
-            
-            # Remove all files except .gitkeep
-            find downloads -type f ! -name '.gitkeep' -delete
-            find downloads -type d -empty -delete
-            
-            # Recreate if needed
-            mkdir -p downloads
-            touch downloads/.gitkeep
-            
-            echo "✅ Downloads folder cleaned"
-          else
-            echo "⚠️ No downloads folder found"
-          fi
-      
+          echo "Cleaning downloads..."
+          find downloads -type f ! -name '.gitkeep' -delete
+          find downloads -type d -empty -delete
+          mkdir -p downloads
+          touch downloads/.gitkeep
+          echo "Done."
+
       - name: Clean History Only
         if: github.event.inputs.target == 'Clean History Only'
         run: |
-          echo "🗑️ Cleaning history folder..."
-          
-          if [ -d "history" ]; then
-            FILE_COUNT=$(find history -type f | wc -l)
-            
-            echo "Removing $FILE_COUNT history files"
-            
-            rm -rf history
-            mkdir -p history
-            
-            echo "✅ History folder cleaned"
-          else
-            echo "⚠️ No history folder found"
-          fi
-      
-      - name: Clean Old Downloads (Keep Last 3)
-        if: github.event.inputs.target == 'Clean Old Downloads (Keep Last 3)'
+          echo "Cleaning history..."
+          rm -rf history
+          mkdir -p history
+          echo "Done."
+
+      - name: Keep Last 3 Downloads
+        if: github.event.inputs.target == 'Keep Last 3 Downloads'
         run: |
-          echo "🗑️ Cleaning old downloads (keeping last 3)..."
-          
-          if [ -d "downloads" ]; then
-            # List download directories sorted by name (which includes timestamp)
-            DOWNLOADS=$(find downloads -maxdepth 1 -type d ! -name 'downloads' ! -name '.gitkeep' | sort -r)
-            TOTAL=$(echo "$DOWNLOADS" | wc -l)
-            KEEP=3
-            
-            echo "Found $TOTAL download directories"
-            
-            if [ "$TOTAL" -le "$KEEP" ]; then
-              echo "✅ Only $TOTAL directories exist, nothing to clean"
-            else
-              COUNT=0
-              echo "$DOWNLOADS" | while read -r dir; do
-                COUNT=$((COUNT + 1))
-                if [ "$COUNT" -gt "$KEEP" ]; then
-                  DIR_SIZE=$(du -sh "$dir" 2>/dev/null | cut -f1)
-                  echo "  Removing: $(basename "$dir") ($DIR_SIZE)"
-                  rm -rf "$dir"
-                else
-                  echo "  Keeping: $(basename "$dir")"
-                fi
-              done
-              echo "✅ Old downloads cleaned"
+          echo "Keeping last 3 downloads..."
+          DIRS=$(find downloads -maxdepth 1 -type d ! -name 'downloads' | sort -r)
+          COUNT=0
+          for dir in $DIRS; do
+            COUNT=$((COUNT + 1))
+            if [ $COUNT -gt 3 ]; then
+              echo "Removing: $(basename "$dir")"
+              rm -rf "$dir"
             fi
-          else
-            echo "⚠️ No downloads folder found"
-          fi
-          
-          # Also clean old history entries (keep last 10)
-          if [ -d "history" ]; then
-            echo ""
-            echo "Cleaning old history entries (keeping last 10)..."
-            
-            HISTORIES=$(find history -maxdepth 1 -type d ! -name 'history' | sort -r)
-            HIST_TOTAL=$(echo "$HISTORIES" | wc -l)
-            HIST_KEEP=10
-            
-            if [ "$HIST_TOTAL" -gt "$HIST_KEEP" ]; then
-              COUNT=0
-              echo "$HISTORIES" | while read -r dir; do
-                COUNT=$((COUNT + 1))
-                if [ "$COUNT" -gt "$HIST_KEEP" ]; then
-                  echo "  Removing history: $(basename "$dir")"
-                  rm -rf "$dir"
-                fi
-              done
-              echo "✅ Old history entries cleaned"
-            else
-              echo "✅ Only $HIST_TOTAL history entries, nothing to clean"
-            fi
-          fi
-      
-      - name: Commit and push changes
+          done
+          echo "Done."
+
+      - name: Keep Last 5 Downloads
+        if: github.event.inputs.target == 'Keep Last 5 Downloads'
         run: |
-          # Check if there are any changes
-          if git diff --quiet && git diff --staged --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
-          
+          echo "Keeping last 5 downloads..."
+          DIRS=$(find downloads -maxdepth 1 -type d ! -name 'downloads' | sort -r)
+          COUNT=0
+          for dir in $DIRS; do
+            COUNT=$((COUNT + 1))
+            if [ $COUNT -gt 5 ]; then
+              echo "Removing: $(basename "$dir")"
+              rm -rf "$dir"
+            fi
+          done
+          echo "Done."
+
+      - name: Commit and push
+        run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          
-          # Stage deletions
           git add -A downloads/ history/
           
-          # Count deletions
           DELETED=$(git diff --cached --diff-filter=D --name-only | wc -l)
           
           if [ "$DELETED" -gt 0 ]; then
-            git commit -m "🧹 Cleanup: Removed $DELETED files"
+            git commit -m "Cleanup: Removed $DELETED files"
             git push
-            echo "==========================================="
-            echo "✅ Cleanup complete! Removed $DELETED files."
-            echo "==========================================="
+            echo "Removed $DELETED files."
           else
-            echo "No deletions to commit"
+            echo "Nothing to clean."
           fi
-      
-      - name: Show current disk usage
-        run: |
-          echo ""
-          echo "📊 Current repository storage:"
-          echo "================================"
-          
-          if [ -d "downloads" ]; then
-            DOWNLOADS_SIZE=$(du -sh downloads 2>/dev/null | cut -f1)
-            DOWNLOADS_COUNT=$(find downloads -type f ! -name '.gitkeep' | wc -l)
-            echo "Downloads: $DOWNLOADS_SIZE ($DOWNLOADS_COUNT files)"
-          else
-            echo "Downloads: empty"
-          fi
-          
-          if [ -d "history" ]; then
-            HISTORY_SIZE=$(du -sh history 2>/dev/null | cut -f1)
-            HISTORY_COUNT=$(find history -type f | wc -l)
-            echo "History: $HISTORY_SIZE ($HISTORY_COUNT files)"
-          else
-            echo "History: empty"
-          fi
-          
-          REPO_SIZE=$(du -sh . 2>/dev/null | cut -f1)
-          echo "Total repo: $REPO_SIZE"
