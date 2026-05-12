@@ -30,7 +30,7 @@ A GitHub Actions-powered downloader that supports torrents, magnets, and direct 
 | **Torrent - Preserve Structure** | Keeps original torrent folder hierarchy |
 | **Torrent - Zip Entire Folder** | Zips entire folder, splits the zip if >95MB |
 | **Torrent - Show Info Only** | Preview torrent contents without downloading |
-| **Upload as Artifact** | Upload as GitHub Artifact (90-day retention, no splitting) |
+| **Upload as Artifact** | Upload as GitHub Artifact (90-day retention, no splitting)[not whitelisted in iran] |
 
 ## 🔧 How to Use
 
