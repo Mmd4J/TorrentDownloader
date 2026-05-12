@@ -4,6 +4,21 @@ All times in **Tehran timezone (IR)**.
 
 ## 📥 Download History
 
+### 📅 2026-05-12 15:11 (Tehran)
+**Mode:** Torrent - Zip Entire Folder
+**Files:**
+
+- 📦 **ReZERO -Starting Life in Another World- [Yen Press] [Stick].zip.7z** (Split - 364.2MB)
+  ├─ 📎 [**ReZERO -Starting Life in Another World- [Yen Press] [Stick].zip.7z.001**](https://raw.githubusercontent.com/KawouT/Torrent/Test/downloads/20260512_113606_ReZERO_-Starting_Life_in_Another_World-__Yen_Press___Stick_/ReZERO%20-Starting%20Life%20in%20Another%20World-%20%5BYen%20Press%5D%20%5BStick%5D.zip.7z.001) - 95M
+  ├─ 📎 [**ReZERO -Starting Life in Another World- [Yen Press] [Stick].zip.7z.002**](https://raw.githubusercontent.com/KawouT/Torrent/Test/downloads/20260512_113606_ReZERO_-Starting_Life_in_Another_World-__Yen_Press___Stick_/ReZERO%20-Starting%20Life%20in%20Another%20World-%20%5BYen%20Press%5D%20%5BStick%5D.zip.7z.002) - 95M
+  ├─ 📎 [**ReZERO -Starting Life in Another World- [Yen Press] [Stick].zip.7z.003**](https://raw.githubusercontent.com/KawouT/Torrent/Test/downloads/20260512_113606_ReZERO_-Starting_Life_in_Another_World-__Yen_Press___Stick_/ReZERO%20-Starting%20Life%20in%20Another%20World-%20%5BYen%20Press%5D%20%5BStick%5D.zip.7z.003) - 95M
+  └─ 📎 [**ReZERO -Starting Life in Another World- [Yen Press] [Stick].zip.7z.004**](https://raw.githubusercontent.com/KawouT/Torrent/Test/downloads/20260512_113606_ReZERO_-Starting_Life_in_Another_World-__Yen_Press___Stick_/ReZERO%20-Starting%20Life%20in%20Another%20World-%20%5BYen%20Press%5D%20%5BStick%5D.zip.7z.004) - 80M
+  💡 *Download all parts, then: 7z x ReZERO -Starting Life in Another World- [Yen Press] [Stick].zip.7z.001*
+
+[📋 Download All Links](https://raw.githubusercontent.com/KawouT/Torrent/Test/history/20260512_113606/links.txt)
+---
+
+
 ### 📅 2026-05-12 14:50 (Tehran)
 **Mode:** Torrent - Flat Files
 **Files:**
