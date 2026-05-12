@@ -80,7 +80,7 @@ Clean History Only - Clear history entries
 
 Keep Last 3/5 Downloads - Remove older downloads
 
-## ⚠️ Limits            Limit	Value
+## ⚠️ Limits   -----     Limit	Value
 -----------------------------------------------------
 Individual file size	100 MB (files split at 95MB)
 -----------------------------------------------------
