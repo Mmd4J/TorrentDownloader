@@ -61,13 +61,29 @@ jobs:
             history/
           sparse-checkout-cone-mode: false
 
-      - name: Install dependencies (skip if already installed)
+      - name: Install dependencies (updates every 7 days)
         run: |
-          if ! command -v aria2c &> /dev/null; then
+          LAST_UPDATE_FILE="/tmp/.last_apt_update"
+          SHOULD_UPDATE=false
+          
+          if [ ! -f "$LAST_UPDATE_FILE" ]; then
+            SHOULD_UPDATE=true
+          else
+            LAST_UPDATE=$(cat "$LAST_UPDATE_FILE")
+            NOW=$(date +%s)
+            DAYS_OLD=$(( (NOW - LAST_UPDATE) / 86400 ))
+            if [ $DAYS_OLD -gt 7 ]; then
+              echo "Last update was $DAYS_OLD days ago, refreshing..."
+              SHOULD_UPDATE=true
+            fi
+          fi
+          
+          if [ "$SHOULD_UPDATE" = true ]; then
             sudo apt-get update -qq
             sudo apt-get install -y aria2 p7zip-full p7zip-rar curl jq python3
+            date +%s > "$LAST_UPDATE_FILE"
           else
-            echo "Dependencies already installed"
+            echo "Dependencies up-to-date (updated $DAYS_OLD days ago)"
           fi
 
       - name: Check existing downloads via manifest
@@ -256,14 +272,12 @@ jobs:
               aria2c --dir="${DOWNLOAD_DIR}" --out="torrent.torrent" "${{ github.event.inputs.url }}"
               ARIA2_INPUT="${DOWNLOAD_DIR}/torrent.torrent"
             fi
-            [ "$MODE" = "Torrent - Preserve Structure" ] || [ "$MODE" = "Torrent - Zip Entire Folder" ] || STRUCTURE_OPTION=""
             aria2c --seed-time=0 \
                    --max-connection-per-server=${{ github.event.inputs.max_connections }} \
                    --split=${{ github.event.inputs.max_connections }} \
                    --dir="$DOWNLOAD_DIR" \
                    --continue=true \
                    --file-allocation=falloc \
-                   $STRUCTURE_OPTION \
                    ${{ steps.file_selection.outputs.select_option }} \
                    "$ARIA2_INPUT"
             rm -f "${DOWNLOAD_DIR}/torrent.torrent"
