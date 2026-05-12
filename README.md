@@ -94,7 +94,7 @@ Keep Last 3/5 Downloads - Remove older downloads
 -----------------------------------------------------
 Individual file size -->	100 MB (files split at 95MB)
 -----------------------------------------------------
-Push size -->	2 GB (handled by 500MB batch commits)
+Push size -->	2 GB (handled by 1GB batch commits)
 -----------------------------------------------------
 Artifact retention -->	90 days (10GB MAX)
 -----------------------------------------------------
