@@ -58,7 +58,18 @@ jobs:
             history/
           sparse-checkout-cone-mode: false
 
-      - name: Install dependencies (skip if installed)
+      - name: Cache dependencies
+        id: deps_cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/cache/apt/archives
+            /home/runner/.apt_timestamp
+          key: deps-${{ runner.os }}-${{ hashFiles('.github/workflows/torrent-downloader.yml') }}
+
+      - name: Install dependencies (updates every 7 days)
+        run: |
+          TIMESTAMP_FILE="/home/runner/.apt_timestamp/last_update"
         run: |
           if command -v aria2c &> /dev/null && command -v 7z &> /dev/null && command -v jq &> /dev/null; then
             echo "All dependencies already installed, skipping."
