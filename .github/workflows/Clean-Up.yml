@@ -21,85 +21,68 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 1
-          sparse-checkout: |
-            downloads/
-            history/
-          sparse-checkout-cone-mode: false
-
       - name: Clean Everything
         if: github.event.inputs.target == 'Clean Everything'
         run: |
-          echo "Cleaning everything..."
-          rm -rf downloads history
-          mkdir -p downloads history
-          touch downloads/.gitkeep
-          echo "Done."
+          git clone --depth=1 --no-checkout https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo
+          cd repo
+          git rm -r --cached downloads/ history/ 2>/dev/null
+          git commit -m "Clean everything" || exit 0
+          git push
+          echo "Everything cleaned."
 
       - name: Clean Downloads Only
         if: github.event.inputs.target == 'Clean Downloads Only'
         run: |
-          echo "Cleaning downloads..."
-          find downloads -type f ! -name '.gitkeep' -delete
-          find downloads -type d -empty -delete
-          mkdir -p downloads
-          touch downloads/.gitkeep
-          echo "Done."
+          git clone --depth=1 --no-checkout https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo
+          cd repo
+          git rm -r --cached downloads/ 2>/dev/null
+          git commit -m "Clean downloads" || exit 0
+          git push
+          echo "Downloads cleaned."
 
       - name: Clean History Only
         if: github.event.inputs.target == 'Clean History Only'
         run: |
-          echo "Cleaning history..."
-          rm -rf history
-          mkdir -p history
-          echo "Done."
+          git clone --depth=1 --no-checkout https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo
+          cd repo
+          git rm -r --cached history/ 2>/dev/null
+          git commit -m "Clean history" || exit 0
+          git push
+          echo "History cleaned."
 
       - name: Keep Last 3 Downloads
         if: github.event.inputs.target == 'Keep Last 3 Downloads'
         run: |
-          echo "Keeping last 3 downloads..."
+          git clone --depth=1 --no-checkout https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo
+          cd repo
+          git checkout HEAD -- downloads/
           DIRS=$(find downloads -maxdepth 1 -type d ! -name 'downloads' | sort -r)
           COUNT=0
           for dir in $DIRS; do
             COUNT=$((COUNT + 1))
             if [ $COUNT -gt 3 ]; then
-              echo "Removing: $(basename "$dir")"
-              rm -rf "$dir"
+              git rm -r --cached "$dir" 2>/dev/null
             fi
           done
-          echo "Done."
+          git commit -m "Keep last 3 downloads" || exit 0
+          git push
+          echo "Kept last 3 downloads."
 
       - name: Keep Last 5 Downloads
         if: github.event.inputs.target == 'Keep Last 5 Downloads'
         run: |
-          echo "Keeping last 5 downloads..."
+          git clone --depth=1 --no-checkout https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo
+          cd repo
+          git checkout HEAD -- downloads/
           DIRS=$(find downloads -maxdepth 1 -type d ! -name 'downloads' | sort -r)
           COUNT=0
           for dir in $DIRS; do
             COUNT=$((COUNT + 1))
             if [ $COUNT -gt 5 ]; then
-              echo "Removing: $(basename "$dir")"
-              rm -rf "$dir"
+              git rm -r --cached "$dir" 2>/dev/null
             fi
           done
-          echo "Done."
-
-      - name: Commit and push
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add -A downloads/ history/
-          
-          DELETED=$(git diff --cached --diff-filter=D --name-only | wc -l)
-          
-          if [ "$DELETED" -gt 0 ]; then
-            git commit -m "Cleanup: Removed $DELETED files"
-            git push
-            echo "Removed $DELETED files."
-          else
-            echo "Nothing to clean."
-          fi
+          git commit -m "Keep last 5 downloads" || exit 0
+          git push
+          echo "Kept last 5 downloads."
