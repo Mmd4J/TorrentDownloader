@@ -355,6 +355,8 @@ jobs:
       - name: Update history
         if: github.event.inputs.mode != 'Torrent - Show Info Only'
         run: |
+          export TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
+          
           python3 << 'PYEOF'
           import json
           import urllib.parse
@@ -368,14 +370,11 @@ jobs:
           download_dir = "${{ steps.download.outputs.download_dir }}"
           torrent_url = "${{ github.event.inputs.url }}"
           mode = "${{ github.event.inputs.mode }}"
+          tehran_time = os.environ['TEHRAN_TIME']
           
           manifest_file = f"history/{timestamp}/manifest.json"
           history_readme = "history/README.md"
           links_file = f"history/{timestamp}/links.txt"
-          
-          # Get Tehran time
-          import subprocess
-          tehran_time = subprocess.check_output(["TZ=Asia/Tehran", "date", "+%Y-%m-%d %H:%M"]).decode().strip()
           
           with open(manifest_file) as f:
               manifest = json.load(f)
@@ -473,7 +472,6 @@ jobs:
           
           print("✅ History updated!")
           PYEOF
-
       - name: Commit and push changes
         if: github.event.inputs.mode != 'Torrent - Show Info Only'
         run: |
