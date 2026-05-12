@@ -56,31 +56,16 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             .gitattributes
-            .github/
             history/
           sparse-checkout-cone-mode: false
 
-      - name: Install dependencies (updates every 7 days)
+      - name: Install dependencies (skip if already installed)
         run: |
-          LAST_UPDATE_FILE=".github/.last_apt_update"
-          SHOULD_UPDATE=false
-          if [ ! -f "$LAST_UPDATE_FILE" ]; then
-            SHOULD_UPDATE=true
+          if command -v aria2c &> /dev/null && command -v 7z &> /dev/null && command -v jq &> /dev/null; then
+            echo "All dependencies already installed, skipping."
           else
-            LAST_UPDATE=$(cat "$LAST_UPDATE_FILE")
-            NOW=$(date +%s)
-            DAYS_OLD=$(( (NOW - LAST_UPDATE) / 86400 ))
-            if [ $DAYS_OLD -gt 7 ]; then
-              echo "Last update was $DAYS_OLD days ago, refreshing..."
-              SHOULD_UPDATE=true
-            fi
-          fi
-          if [ "$SHOULD_UPDATE" = true ]; then
             sudo apt-get update -qq
             sudo apt-get install -y aria2 p7zip-full p7zip-rar curl jq python3
-            date +%s > "$LAST_UPDATE_FILE"
-          else
-            echo "Dependencies up-to-date (updated $DAYS_OLD days ago)"
           fi
 
       - name: Check existing downloads via manifest
@@ -494,7 +479,7 @@ jobs:
           rm -rf .temp
           git sparse-checkout add "${{ steps.download.outputs.download_dir }}"
           
-          git add .github/ history/
+          git add history/
           if git diff --cached --quiet; then
             echo "No history changes"
           else
