@@ -66,7 +66,6 @@ jobs:
         run: |
           LAST_UPDATE_FILE=".github/.last_apt_update"
           SHOULD_UPDATE=false
-          
           if [ ! -f "$LAST_UPDATE_FILE" ]; then
             SHOULD_UPDATE=true
           else
@@ -78,7 +77,6 @@ jobs:
               SHOULD_UPDATE=true
             fi
           fi
-          
           if [ "$SHOULD_UPDATE" = true ]; then
             sudo apt-get update -qq
             sudo apt-get install -y aria2 p7zip-full p7zip-rar curl jq python3
@@ -214,20 +212,29 @@ jobs:
           TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
           mkdir -p "history/${TIMESTAMP}"
-          echo "# Torrent Contents" > "history/${TIMESTAMP}/torrent_info.md"
-          echo "**Date:** ${TEHRAN_TIME} (Tehran)" >> "history/${TIMESTAMP}/torrent_info.md"
-          echo "**Files:**" >> "history/${TIMESTAMP}/torrent_info.md"
-          if [ -f ".temp/parsed_files.txt" ]; then
-            while IFS='|' read -r display_idx aria2_idx size path; do
-              SIZE_HUMAN=$(numfmt --to=iec "$size" 2>/dev/null || echo "$size bytes")
-              echo "- [${display_idx}] ${path} (${SIZE_HUMAN})" >> "history/${TIMESTAMP}/torrent_info.md"
-            done < ".temp/parsed_files.txt"
-          fi
+          {
+            echo "# Torrent Contents"
+            echo ""
+            echo "**Date:** ${TEHRAN_TIME} (Tehran)"
+            echo ""
+            echo "**Files:**"
+            echo ""
+            if [ -f ".temp/parsed_files.txt" ]; then
+              while IFS='|' read -r display_idx aria2_idx size path; do
+                SIZE_HUMAN=$(numfmt --to=iec "$size" 2>/dev/null || echo "$size bytes")
+                echo "- [${display_idx}] ${path} (${SIZE_HUMAN})"
+              done < ".temp/parsed_files.txt"
+            fi
+          } > "history/${TIMESTAMP}/torrent_info.md"
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add .github/ history/
-          git commit -m "Torrent info: ${TIMESTAMP}" || echo "Nothing to commit"
-          git push
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+          else
+            git commit -m "Torrent info: ${TIMESTAMP}"
+            git push
+          fi
 
       - name: Determine files to download
         if: contains(github.event.inputs.mode, 'Torrent') && github.event.inputs.mode != 'Torrent - Show Info Only'
@@ -326,7 +333,12 @@ jobs:
           TIMESTAMP="${{ steps.download.outputs.timestamp }}"
           REPORT_DIR="history/${TIMESTAMP}"
           mkdir -p "$REPORT_DIR"
-          echo "{\"timestamp\":\"${TIMESTAMP}\",\"url\":\"${{ github.event.inputs.url }}\",\"mode\":\"${{ github.event.inputs.mode }}\",\"download_dir\":\"${DOWNLOAD_DIR}\",\"files\":[" > "${REPORT_DIR}/manifest.json"
+          echo "{" > "${REPORT_DIR}/manifest.json"
+          echo "  \"timestamp\": \"${TIMESTAMP}\"," >> "${REPORT_DIR}/manifest.json"
+          echo "  \"url\": \"${{ github.event.inputs.url }}\"," >> "${REPORT_DIR}/manifest.json"
+          echo "  \"mode\": \"${{ github.event.inputs.mode }}\"," >> "${REPORT_DIR}/manifest.json"
+          echo "  \"download_dir\": \"${DOWNLOAD_DIR}\"," >> "${REPORT_DIR}/manifest.json"
+          echo "  \"files\": [" >> "${REPORT_DIR}/manifest.json"
           FIRST=true
           find "$DOWNLOAD_DIR" -type f ! -name "*.torrent" -print0 | sort -z | while IFS= read -r -d '' file; do
             REL_PATH="${file#$DOWNLOAD_DIR/}"
@@ -335,120 +347,132 @@ jobs:
             SIZE_HUMAN=$(numfmt --to=iec $FILE_SIZE 2>/dev/null || echo "${FILE_SIZE} bytes")
             [ "$FIRST" = false ] && echo "," >> "${REPORT_DIR}/manifest.json"
             FIRST=false
-            echo "{\"path\":\"${REL_PATH}\",\"size\":${FILE_SIZE},\"size_human\":\"${SIZE_HUMAN}\",\"sha256\":\"${FILE_HASH}\"}" >> "${REPORT_DIR}/manifest.json"
+            echo "    {\"path\": \"${REL_PATH}\", \"size\": ${FILE_SIZE}, \"size_human\": \"${SIZE_HUMAN}\", \"sha256\": \"${FILE_HASH}\"}" >> "${REPORT_DIR}/manifest.json"
           done
-          echo "]}" >> "${REPORT_DIR}/manifest.json"
+          echo "  ]" >> "${REPORT_DIR}/manifest.json"
+          echo "}" >> "${REPORT_DIR}/manifest.json"
 
       - name: Update history
         if: github.event.inputs.mode != 'Torrent - Show Info Only'
         run: |
-          export MANIFEST_FILE="history/${{ steps.download.outputs.timestamp }}/manifest.json"
-          export REPO="${{ github.repository }}"
-          export BRANCH="${{ github.ref_name }}"
-          export DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
-          export DOWNLOAD_URL="${{ github.event.inputs.url }}"
-          export MODE="${{ github.event.inputs.mode }}"
-          export HISTORY_README="history/README.md"
-          export LINKS_FILE="history/${{ steps.download.outputs.timestamp }}/links.txt"
-          export TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
-          export TIMESTAMP="${{ steps.download.outputs.timestamp }}"
-          
           python3 << 'PYEOF'
-import json, urllib.parse, os, re
-from collections import defaultdict
-
-m = json.load(open(os.environ['MANIFEST_FILE']))
-normal_files = []
-split_groups = defaultdict(list)
-
-for f in m['files']:
-    p = f['path']
-    mt = re.match(r'(.+)\.7z\.(\d{3})$', p)
-    if mt:
-        split_groups[mt.group(1)].append(f)
-    else:
-        normal_files.append(f)
-
-icons = {
-    'zip': '🗜️', 'mkv': '🎬', 'mp4': '🎬', 'mov': '🎬', 'webm': '🎬',
-    'mp3': '🎵', 'flac': '🎵', 'ogg': '🎵', 'm4a': '🎵',
-    'jpg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'webp': '🖼️',
-    'pdf': '📕', 'epub': '📗',
-    'txt': '📄', 'srt': '💬',
-}
-
-def icon(p):
-    ext = p.lower().split('.')[-1] if '.' in p else ''
-    return icons.get(ext, '📄')
-
-def link(p):
-    encoded = urllib.parse.quote(p, safe='')
-    return 'https://raw.githubusercontent.com/' + os.environ['REPO'] + '/' + os.environ['BRANCH'] + '/' + os.environ['DOWNLOAD_DIR'] + '/' + encoded
-
-all_links = []
-lines = []
-
-lines.append('### 📅 ' + os.environ['TEHRAN_TIME'] + ' (Tehran)')
-lines.append('')
-lines.append('**Mode:** ' + os.environ['MODE'])
-lines.append('')
-lines.append('**Files:**')
-lines.append('')
-
-for f in normal_files:
-    l = link(f['path'])
-    all_links.append(l)
-    lines.append('- ' + icon(f['path']) + ' [**' + f['path'] + '**](' + l + ') - ' + f['size_human'])
-
-for b, p in sorted(split_groups.items()):
-    p.sort(key=lambda x: x['path'])
-    ts = sum(x['size'] for x in p)
-    if ts >= 1073741824:
-        th = f'{ts/1073741824:.2f}GB'
-    elif ts >= 1048576:
-        th = f'{ts/1048576:.1f}MB'
-    else:
-        th = f'{ts//1024}KB'
-    
-    lines.append('')
-    lines.append('- 📦 **' + b + '.7z** (Split Archive - ' + th + ' total)')
-    
-    for i, pt in enumerate(p):
-        l = link(pt['path'])
-        all_links.append(l)
-        if i == len(p) - 1:
-            px = '  └─'
-        else:
-            px = '  ├─'
-        lines.append(px + ' 📎 [**' + pt['path'] + '**](' + l + ') - ' + pt['size_human'])
-    
-    lines.append('  💡 *Download all parts, then: `7z x ' + p[0]['path'] + '`*')
-
-lines.append('')
-links_raw_url = 'https://raw.githubusercontent.com/' + os.environ['REPO'] + '/' + os.environ['BRANCH'] + '/history/' + os.environ['TIMESTAMP'] + '/links.txt'
-lines.append('[📋 Download All Links](' + links_raw_url + ')')
-lines.append('')
-lines.append('---')
-lines.append('')
-
-entry = '\n'.join(lines)
-
-open(os.environ['LINKS_FILE'], 'w').write('\n'.join(all_links) + '\n')
-
-if os.path.exists(os.environ['HISTORY_README']):
-    c = open(os.environ['HISTORY_README']).read()
-    mk = '## 📥 Download History'
-    if mk in c:
-        parts = c.split(mk, 1)
-        new_content = parts[0] + mk + '\n\n' + entry + parts[1]
-    else:
-        new_content = c + '\n' + entry
-else:
-    new_content = '# 📥 Torrent Download History\n\nAll times in **Tehran timezone (IR)**.\n\n## 📥 Download History\n\n' + entry
-
-open(os.environ['HISTORY_README'], 'w').write(new_content)
-print('History updated!')
-PYEOF
+          import json
+          import urllib.parse
+          import os
+          import re
+          from collections import defaultdict
+          
+          timestamp = "${{ steps.download.outputs.timestamp }}"
+          repo = "${{ github.repository }}"
+          branch = "${{ github.ref_name }}"
+          download_dir = "${{ steps.download.outputs.download_dir }}"
+          torrent_url = "${{ github.event.inputs.url }}"
+          mode = "${{ github.event.inputs.mode }}"
+          
+          manifest_file = f"history/{timestamp}/manifest.json"
+          history_readme = "history/README.md"
+          links_file = f"history/{timestamp}/links.txt"
+          
+          # Get Tehran time
+          import subprocess
+          tehran_time = subprocess.check_output(["TZ=Asia/Tehran", "date", "+%Y-%m-%d %H:%M"]).decode().strip()
+          
+          with open(manifest_file) as f:
+              manifest = json.load(f)
+          
+          normal_files = []
+          split_groups = defaultdict(list)
+          
+          for file_info in manifest['files']:
+              p = file_info['path']
+              mt = re.match(r'(.+)\.7z\.(\d{3})$', p)
+              if mt:
+                  split_groups[mt.group(1)].append(file_info)
+              else:
+                  normal_files.append(file_info)
+          
+          icons = {
+              'zip': '🗜️', 'mkv': '🎬', 'mp4': '🎬', 'mov': '🎬', 'webm': '🎬',
+              'mp3': '🎵', 'flac': '🎵', 'ogg': '🎵', 'm4a': '🎵',
+              'jpg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'webp': '🖼️',
+              'pdf': '📕', 'epub': '📗',
+              'txt': '📄', 'srt': '💬',
+          }
+          
+          def get_icon(path):
+              ext = path.lower().split('.')[-1] if '.' in path else ''
+              return icons.get(ext, '📄')
+          
+          def make_link(path):
+              encoded = urllib.parse.quote(path, safe='')
+              full_path = f"{download_dir}/{encoded}"
+              return f"https://raw.githubusercontent.com/{repo}/{branch}/{full_path}"
+          
+          all_links = []
+          lines = []
+          
+          lines.append(f"### 📅 {tehran_time} (Tehran)")
+          lines.append("")
+          lines.append(f"**Mode:** {mode}")
+          lines.append("")
+          lines.append("**Files:**")
+          lines.append("")
+          
+          for f in normal_files:
+              l = make_link(f['path'])
+              all_links.append(l)
+              lines.append(f"- {get_icon(f['path'])} [**{f['path']}**]({l}) - {f['size_human']}")
+          
+          for b, p in sorted(split_groups.items()):
+              p.sort(key=lambda x: x['path'])
+              ts = sum(x['size'] for x in p)
+              if ts >= 1073741824:
+                  th = f'{ts/1073741824:.2f}GB'
+              elif ts >= 1048576:
+                  th = f'{ts/1048576:.1f}MB'
+              else:
+                  th = f'{ts//1024}KB'
+              
+              lines.append("")
+              lines.append(f"- 📦 **{b}.7z** (Split Archive - {th} total)")
+              
+              for i, pt in enumerate(p):
+                  l = make_link(pt['path'])
+                  all_links.append(l)
+                  px = "  └─" if i == len(p) - 1 else "  ├─"
+                  lines.append(f"{px} 📎 [**{pt['path']}**]({l}) - {pt['size_human']}")
+              
+              lines.append(f"  💡 *Download all parts, then: `7z x {p[0]['path']}`*")
+          
+          lines.append("")
+          links_raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/history/{timestamp}/links.txt"
+          lines.append(f"[📋 Download All Links]({links_raw_url})")
+          lines.append("")
+          lines.append("---")
+          lines.append("")
+          
+          entry = "\n".join(lines)
+          
+          with open(links_file, 'w') as f:
+              f.write("\n".join(all_links) + "\n")
+          
+          if os.path.exists(history_readme):
+              with open(history_readme) as f:
+                  content = f.read()
+              mk = '## 📥 Download History'
+              if mk in content:
+                  parts = content.split(mk, 1)
+                  new_content = parts[0] + mk + '\n\n' + entry + parts[1]
+              else:
+                  new_content = content + '\n' + entry
+          else:
+              new_content = f"# 📥 Torrent Download History\n\nAll times in **Tehran timezone (IR)**.\n\n## 📥 Download History\n\n{entry}"
+          
+          with open(history_readme, 'w') as f:
+              f.write(new_content)
+          
+          print("✅ History updated!")
+          PYEOF
 
       - name: Commit and push changes
         if: github.event.inputs.mode != 'Torrent - Show Info Only'
@@ -474,7 +498,7 @@ PYEOF
               if [ $((CURRENT_BATCH_SIZE + FILE_SIZE_MB)) -gt $BATCH_SIZE_MB ] && [ -s /tmp/batch_files.txt ]; then
                 echo "Pushing batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
                 cat /tmp/batch_files.txt | xargs -d '\n' git add --sparse
-                git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || true
+                git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
                 git push
                 BATCH_NUM=$((BATCH_NUM + 1)); CURRENT_BATCH_SIZE=0; > /tmp/batch_files.txt
               fi
@@ -484,12 +508,16 @@ PYEOF
             if [ -s /tmp/batch_files.txt ]; then
               echo "Pushing final batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
               cat /tmp/batch_files.txt | xargs -d '\n' git add --sparse
-              git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || true
+              git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
               git push
             fi
             rm -f /tmp/batch_files.txt
           fi
           git add .github/ history/
-          git commit -m "Update history: ${{ steps.download.outputs.timestamp }}" || echo "Nothing to commit"
-          git push
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+          else
+            git commit -m "Update history: ${{ steps.download.outputs.timestamp }}"
+            git push
+          fi
           echo "DONE!"
