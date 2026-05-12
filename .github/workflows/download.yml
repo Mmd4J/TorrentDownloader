@@ -17,17 +17,13 @@ on:
           - 'Torrent - Zip Entire Folder'
           - 'Torrent - Show Info Only'
           - 'Direct Download'
+          - 'Upload as Artifact'
         default: 'Torrent - Flat Files'
       max_connections:
         description: 'Max connections per file (default: 16)'
         required: false
         type: string
         default: '16'
-      split_size:
-        description: 'Split size in MB (default: 95)'
-        required: false
-        type: string
-        default: '95'
       select_files:
         description: 'Torrent: Select file indexes (e.g., "1,3,5" or empty for all)'
         required: false
@@ -46,12 +42,14 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   download:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout history only
+        if: github.event.inputs.mode != 'Upload as Artifact'
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -86,6 +84,7 @@ jobs:
           fi
 
       - name: Check existing downloads via manifest
+        if: github.event.inputs.mode != 'Upload as Artifact'
         id: check_existing
         run: |
           MODE="${{ github.event.inputs.mode }}"
@@ -131,7 +130,7 @@ jobs:
           echo "clean_name=${CLEAN_NAME}" >> $GITHUB_OUTPUT
 
       - name: Full checkout if resuming
-        if: steps.check_existing.outputs.status == 'resuming'
+        if: steps.check_existing.outputs.status == 'resuming' && github.event.inputs.mode != 'Upload as Artifact'
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -144,6 +143,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Configure git for binaries
+        if: github.event.inputs.mode != 'Upload as Artifact'
         run: |
           cat >> .gitattributes << 'EOF'
           *.7z.* -delta
@@ -258,7 +258,7 @@ jobs:
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
           MODE="${{ github.event.inputs.mode }}"
           CLEAN_NAME="${{ steps.check_existing.outputs.clean_name }}"
-          if [ "${{ steps.check_existing.outputs.status }}" = "resuming" ]; then
+          if [ "${{ steps.check_existing.outputs.status }}" = "resuming" ] && [ "$MODE" != "Upload as Artifact" ]; then
             DOWNLOAD_DIR="${{ steps.check_existing.outputs.existing_dir }}"
             TIMESTAMP="${{ steps.check_existing.outputs.existing_timestamp }}"
             mkdir -p "$DOWNLOAD_DIR"
@@ -305,32 +305,37 @@ jobs:
           fi
 
       - name: Split large files
-        if: github.event.inputs.mode != 'Torrent - Show Info Only'
+        if: github.event.inputs.mode != 'Torrent - Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
         run: |
           DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
-          SPLIT_SIZE_MB="${{ github.event.inputs.split_size }}"
-          SPLIT_SIZE=$((SPLIT_SIZE_MB * 1048576))
-          echo "Checking for files larger than ${SPLIT_SIZE_MB}MB..."
+          SPLIT_SIZE=$((95 * 1048576))
+          echo "Checking for files larger than 95MB..."
           find "$DOWNLOAD_DIR" -type f ! -name "*.7z.*" -print0 | while IFS= read -r -d '' file; do
             FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
             BASENAME=$(basename "$file")
             DIRNAME=$(dirname "$file")
-            
-            # Check if any split parts already exist for this file
             EXISTING_PARTS=$(find "$DIRNAME" -maxdepth 1 -name "${BASENAME}.7z.*" 2>/dev/null | head -1)
             if [ -n "$EXISTING_PARTS" ]; then
-              echo "Already split: $BASENAME (found existing parts)"
+              echo "Already split: $BASENAME"
               continue
             fi
-            
             if [ "$FILE_SIZE" -gt "$SPLIT_SIZE" ]; then
               echo "Splitting: $BASENAME"
-              7z a -v${SPLIT_SIZE_MB}m -mx0 -mmt=on "${DIRNAME}/${BASENAME}.7z" "$file" && rm "$file"
+              7z a -v95m -mx0 -mmt=on "${DIRNAME}/${BASENAME}.7z" "$file" && rm "$file"
             fi
           done
           echo "Done."
+
+      - name: Upload as artifact
+        if: github.event.inputs.mode == 'Upload as Artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: download-${{ steps.download.outputs.timestamp }}
+          path: ${{ steps.download.outputs.download_dir }}
+          retention-days: 90
+
       - name: Generate report
-        if: github.event.inputs.mode != 'Torrent - Show Info Only'
+        if: github.event.inputs.mode != 'Torrent - Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
         run: |
           DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
           TIMESTAMP="${{ steps.download.outputs.timestamp }}"
@@ -356,7 +361,7 @@ jobs:
           echo "}" >> "${REPORT_DIR}/manifest.json"
 
       - name: Update history
-        if: github.event.inputs.mode != 'Torrent - Show Info Only'
+        if: github.event.inputs.mode != 'Torrent - Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
         run: |
           export TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
           
@@ -482,14 +487,13 @@ jobs:
           python3 /tmp/update_history.py
 
       - name: Commit and push changes
-        if: github.event.inputs.mode != 'Torrent - Show Info Only'
+        if: github.event.inputs.mode != 'Torrent - Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           rm -rf .temp
           git sparse-checkout add "${{ steps.download.outputs.download_dir }}"
           
-          # Commit history first
           git add .github/ history/
           if git diff --cached --quiet; then
             echo "No history changes"
@@ -506,30 +510,30 @@ jobs:
           if [ -z "$ALL_FILES" ]; then
             echo "No new files to commit"
           else
-            CURRENT_BATCH_SIZE=0; BATCH_NUM=1; > /tmp/batch_files.txt
+            CURRENT_BATCH_SIZE=0; BATCH_NUM=1; > /dev/shm/batch_files.txt
             while IFS= read -r file; do
               [ -z "$file" ] && continue
               FILE_SIZE=$(stat -c%s "$file" 2>/dev/null || echo 0)
               FILE_SIZE_MB=$((FILE_SIZE / 1048576))
-              if [ $((CURRENT_BATCH_SIZE + FILE_SIZE_MB)) -gt $BATCH_SIZE_MB ] && [ -s /tmp/batch_files.txt ]; then
+              if [ $((CURRENT_BATCH_SIZE + FILE_SIZE_MB)) -gt $BATCH_SIZE_MB ] && [ -s /dev/shm/batch_files.txt ]; then
                 echo "Pushing batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
-                cat /tmp/batch_files.txt | xargs -d '\n' git add --sparse
+                cat /dev/shm/batch_files.txt | xargs -d '\n' git add --sparse
                 git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
                 git pull --rebase origin ${{ github.ref_name }} || git pull origin ${{ github.ref_name }}
                 git push
-                BATCH_NUM=$((BATCH_NUM + 1)); CURRENT_BATCH_SIZE=0; > /tmp/batch_files.txt
+                BATCH_NUM=$((BATCH_NUM + 1)); CURRENT_BATCH_SIZE=0; > /dev/shm/batch_files.txt
               fi
-              echo "$file" >> /tmp/batch_files.txt
+              echo "$file" >> /dev/shm/batch_files.txt
               CURRENT_BATCH_SIZE=$((CURRENT_BATCH_SIZE + FILE_SIZE_MB))
             done <<< "$ALL_FILES"
-            if [ -s /tmp/batch_files.txt ]; then
+            if [ -s /dev/shm/batch_files.txt ]; then
               echo "Pushing final batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
-              cat /tmp/batch_files.txt | xargs -d '\n' git add --sparse
+              cat /dev/shm/batch_files.txt | xargs -d '\n' git add --sparse
               git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
               git pull --rebase origin ${{ github.ref_name }} || git pull origin ${{ github.ref_name }}
               git push
             fi
-            rm -f /tmp/batch_files.txt
+            rm -f /dev/shm/batch_files.txt
           fi
           
           git push origin ${{ github.ref_name }}
