@@ -326,6 +326,7 @@ jobs:
           export HISTORY_README="history/README.md"
           export LINKS_FILE="history/${{ steps.download.outputs.timestamp }}/links.txt"
           export TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
+          export TIMESTAMP="${{ steps.download.outputs.timestamp }}"
           python3 -c "
           import json, urllib.parse, os, re
           from collections import defaultdict
@@ -352,7 +353,9 @@ jobs:
                   px='  └─' if i==len(p)-1 else '  ├─'
                   L.append(px+' 📎 [**'+pt['path']+'**]('+l+') - '+pt['size_human'])
               L.append('  💡 *Download all parts, then: 7z x '+p[0]['path']+'*')
-          L.append(''); L.append('[📋 Download All Links]('+os.path.basename(os.environ['LINKS_FILE'])+')')
+          L.append('')
+          links_raw_url='https://raw.githubusercontent.com/'+os.environ['REPO']+'/'+os.environ['BRANCH']+'/history/'+os.environ['TIMESTAMP']+'/links.txt'
+          L.append('[📋 Download All Links]('+links_raw_url+')')
           L.append('---')
           open(os.environ['LINKS_FILE'],'w').write('\n'.join(all_links)+'\n')
           entry='\n'.join(L)+'\n'
