@@ -315,17 +315,20 @@ jobs:
             FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
             BASENAME=$(basename "$file")
             DIRNAME=$(dirname "$file")
-            if compgen -G "${DIRNAME}/${BASENAME}.7z.*" > /dev/null 2>&1; then
-              echo "Already split: $BASENAME"
+            
+            # Check if any split parts already exist for this file
+            EXISTING_PARTS=$(find "$DIRNAME" -maxdepth 1 -name "${BASENAME}.7z.*" 2>/dev/null | head -1)
+            if [ -n "$EXISTING_PARTS" ]; then
+              echo "Already split: $BASENAME (found existing parts)"
               continue
             fi
+            
             if [ "$FILE_SIZE" -gt "$SPLIT_SIZE" ]; then
               echo "Splitting: $BASENAME"
               7z a -v${SPLIT_SIZE_MB}m -mx0 -mmt=on "${DIRNAME}/${BASENAME}.7z" "$file" && rm "$file"
             fi
           done
           echo "Done."
-
       - name: Generate report
         if: github.event.inputs.mode != 'Torrent - Show Info Only'
         run: |
