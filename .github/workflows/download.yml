@@ -351,194 +351,169 @@ jobs:
           
           echo "Report generated at ${REPORT_DIR}/manifest.json"
       
-       - name: Update history
-  if: github.event.inputs.mode == 'Download Files'
-  run: |
-    TIMESTAMP="${{ steps.download.outputs.timestamp }}"
-    TORRENT_URL="${{ github.event.inputs.torrent_url }}"
-    REPO="${{ github.repository }}"
-    BRANCH="${{ github.ref_name }}"
-    DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
-    
-    MANIFEST_FILE="history/${TIMESTAMP}/manifest.json"
-    HISTORY_README="history/README.md"
-    TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
-    
-    echo "Updating history..."
-    echo "Manifest: $MANIFEST_FILE"
-    echo "Download dir: $DOWNLOAD_DIR"
-    
-    # Write Python script to a file first (avoids heredoc issues)
-    cat > /tmp/update_history.py << 'PYEOF'
-    import json
-    import urllib.parse
-    import os
-    import re
-    import sys
-    from collections import defaultdict
-    
-    # Get variables from environment
-    manifest_file = os.environ['MANIFEST_FILE']
-    repo = os.environ['REPO']
-    branch = os.environ['BRANCH']
-    download_dir = os.environ['DOWNLOAD_DIR']
-    torrent_url = os.environ['TORRENT_URL']
-    tehran_time = os.environ['TEHRAN_TIME']
-    history_readme = os.environ['HISTORY_README']
-    
-    # Read manifest
-    with open(manifest_file) as f:
-        manifest = json.load(f)
-    
-    # Group files
-    normal_files = []
-    split_groups = defaultdict(list)
-    
-    for file_info in manifest['files']:
-        path = file_info['path']
-        match = re.match(r'(.+)\.7z\.(\d{3})$', path)
-        if match:
-            base_name = match.group(1)
-            split_groups[base_name].append(file_info)
-        else:
-            normal_files.append(file_info)
-    
-    # Build entry
-    lines = []
-    lines.append(f"### 📅 {tehran_time} (Tehran)")
-    lines.append("")
-    lines.append("**Torrent/Magnet:**")
-    lines.append("```")
-    lines.append(torrent_url)
-    lines.append("```")
-    lines.append("")
-    lines.append("**Files:**")
-    lines.append("")
-    
-    # Icons mapping
-    icons = {
-        'zip': '🗜️', 'rar': '📚', '7z': '📦',
-        'mkv': '🎬', 'mp4': '🎬', 'avi': '🎬', 'mov': '🎬', 'webm': '🎬',
-        'mp3': '🎵', 'flac': '🎵', 'ogg': '🎵', 'm4a': '🎵', 'wav': '🎵',
-        'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'webp': '🖼️',
-        'pdf': '📕', 'epub': '📗', 'mobi': '📘',
-        'txt': '📄', 'srt': '💬', 'sub': '💬', 'ass': '💬',
-        'exe': '⚙️', 'apk': '📱',
-    }
-    
-    def get_icon(path):
-        ext = path.lower().split('.')[-1] if '.' in path else ''
-        return icons.get(ext, '📄')
-    
-    def make_link(path):
-        encoded = urllib.parse.quote(path, safe='')
-        full_path = f"{download_dir}/{encoded}"
-        return f"https://raw.githubusercontent.com/{repo}/{branch}/{full_path}"
-    
-    # Process normal files
-    for file_info in normal_files:
-        path = file_info['path']
-        size = file_info['size_human']
-        icon = get_icon(path)
-        link = make_link(path)
-        lines.append(f"- {icon} [**{path}**]({link}) - {size}")
-    
-    # Process split groups
-    for base_name, parts in sorted(split_groups.items()):
-        parts.sort(key=lambda x: x['path'])
-        
-        total_size = sum(p['size'] for p in parts)
-        if total_size >= 1073741824:
-            total_human = f"{total_size/1073741824:.2f}GB"
-        elif total_size >= 1048576:
-            total_human = f"{total_size/1048576:.1f}MB"
-        elif total_size >= 1024:
-            total_human = f"{total_size//1024}KB"
-        else:
-            total_human = f"{total_size}B"
-        
-        lines.append("")
-        lines.append(f"- 📦 **{base_name}.7z** (Split Archive - {total_human} total)")
-        
-        total_parts = len(parts)
-        for i, part in enumerate(parts):
-            path = part['path']
-            size = part['size_human']
-            link = make_link(path)
-            if i == total_parts - 1:
-                prefix = "  └─"
-            else:
-                prefix = "  ├─"
-            lines.append(f"{prefix} 📎 [**{path}**]({link}) - {size}")
-        
-        first_part = parts[0]['path']
-        tip = "  💡 *Download all parts, then:* "
-        tip += "`7z x " + first_part + "`"
-        lines.append(tip)
-    
-    lines.append("")
-    lines.append("---")
-    lines.append("")
-    
-    entry = "\n".join(lines)
-    
-    # Update history README
-    if os.path.exists(history_readme):
-        with open(history_readme) as f:
-            content = f.read()
-        
-        marker = '## 📥 Download History'
-        if marker in content:
-            parts = content.split(marker, 1)
-            new_content = parts[0] + marker + '\n\n' + entry + parts[1]
-        else:
-            new_content = content + '\n' + entry
-    else:
-        new_content = f"""# 📥 Torrent Download History
-
-    All times in **Tehran timezone (IR)**.
-
-    ## 📥 Download History
-
-    {entry}
-    """
-    
-    with open(history_readme, 'w') as f:
-        f.write(new_content)
-    
-    print("✅ History updated successfully!")
-    PYEOF
-    
-    # Export variables and run the Python script
-    export MANIFEST_FILE="$MANIFEST_FILE"
-    export REPO="$REPO"
-    export BRANCH="$BRANCH"
-    export DOWNLOAD_DIR="$DOWNLOAD_DIR"
-    export TORRENT_URL="$TORRENT_URL"
-    export TEHRAN_TIME="$TEHRAN_TIME"
-    export HISTORY_README="$HISTORY_README"
-    
-    python3 /tmp/update_history.py
-        
-      
-      - name: Commit and push changes
+      - name: Update history
         if: github.event.inputs.mode == 'Download Files'
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          TIMESTAMP="${{ steps.download.outputs.timestamp }}"
+          TORRENT_URL="${{ github.event.inputs.torrent_url }}"
+          REPO="${{ github.repository }}"
+          BRANCH="${{ github.ref_name }}"
+          DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
           
-          rm -rf .temp
+          MANIFEST_FILE="history/${TIMESTAMP}/manifest.json"
+          HISTORY_README="history/README.md"
+          TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
           
-          git add downloads/ history/
+          echo "Updating history..."
+          echo "Manifest: $MANIFEST_FILE"
+          echo "Download dir: $DOWNLOAD_DIR"
           
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "📥 Download: ${{ steps.download.outputs.timestamp }}"
-            git push
-          fi
+          # Write Python script to a file first (avoids heredoc issues)
+          cat > /tmp/update_history.py << 'PYEOF'
+          import json
+          import urllib.parse
+          import os
+          import re
+          import sys
+          from collections import defaultdict
           
-          echo "==========================================="
-          echo "DONE! View history at:"
-          echo "https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/history/README.md"
-          echo "==========================================="
+          # Get variables from environment
+          manifest_file = os.environ['MANIFEST_FILE']
+          repo = os.environ['REPO']
+          branch = os.environ['BRANCH']
+          download_dir = os.environ['DOWNLOAD_DIR']
+          torrent_url = os.environ['TORRENT_URL']
+          tehran_time = os.environ['TEHRAN_TIME']
+          history_readme = os.environ['HISTORY_README']
+          
+          # Read manifest
+          with open(manifest_file) as f:
+              manifest = json.load(f)
+          
+          # Group files
+          normal_files = []
+          split_groups = defaultdict(list)
+          
+          for file_info in manifest['files']:
+              path = file_info['path']
+              match = re.match(r'(.+)\.7z\.(\d{3})$', path)
+              if match:
+                  base_name = match.group(1)
+                  split_groups[base_name].append(file_info)
+              else:
+                  normal_files.append(file_info)
+          
+          # Build entry
+          lines = []
+          lines.append(f"### 📅 {tehran_time} (Tehran)")
+          lines.append("")
+          lines.append("**Torrent/Magnet:**")
+          lines.append("```")
+          lines.append(torrent_url)
+          lines.append("```")
+          lines.append("")
+          lines.append("**Files:**")
+          lines.append("")
+          
+          # Icons mapping
+          icons = {
+              'zip': '🗜️', 'rar': '📚', '7z': '📦',
+              'mkv': '🎬', 'mp4': '🎬', 'avi': '🎬', 'mov': '🎬', 'webm': '🎬',
+              'mp3': '🎵', 'flac': '🎵', 'ogg': '🎵', 'm4a': '🎵', 'wav': '🎵',
+              'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'webp': '🖼️',
+              'pdf': '📕', 'epub': '📗', 'mobi': '📘',
+              'txt': '📄', 'srt': '💬', 'sub': '💬', 'ass': '💬',
+              'exe': '⚙️', 'apk': '📱',
+          }
+          
+          def get_icon(path):
+              ext = path.lower().split('.')[-1] if '.' in path else ''
+              return icons.get(ext, '📄')
+          
+          def make_link(path):
+              encoded = urllib.parse.quote(path, safe='')
+              full_path = f"{download_dir}/{encoded}"
+              return f"https://raw.githubusercontent.com/{repo}/{branch}/{full_path}"
+          
+          # Process normal files
+          for file_info in normal_files:
+              path = file_info['path']
+              size = file_info['size_human']
+              icon = get_icon(path)
+              link = make_link(path)
+              lines.append(f"- {icon} [**{path}**]({link}) - {size}")
+          
+          # Process split groups
+          for base_name, parts in sorted(split_groups.items()):
+              parts.sort(key=lambda x: x['path'])
+              
+              total_size = sum(p['size'] for p in parts)
+              if total_size >= 1073741824:
+                  total_human = f"{total_size/1073741824:.2f}GB"
+              elif total_size >= 1048576:
+                  total_human = f"{total_size/1048576:.1f}MB"
+              elif total_size >= 1024:
+                  total_human = f"{total_size//1024}KB"
+              else:
+                  total_human = f"{total_size}B"
+              
+              lines.append("")
+              lines.append(f"- 📦 **{base_name}.7z** (Split Archive - {total_human} total)")
+              
+              total_parts = len(parts)
+              for i, part in enumerate(parts):
+                  path = part['path']
+                  size = part['size_human']
+                  link = make_link(path)
+                  if i == total_parts - 1:
+                      prefix = "  └─"
+                  else:
+                      prefix = "  ├─"
+                  lines.append(f"{prefix} 📎 [**{path}**]({link}) - {size}")
+              
+              first_part = parts[0]['path']
+              tip = "  💡 *Download all parts, then:* "
+              tip += "`7z x " + first_part + "`"
+              lines.append(tip)
+          
+          lines.append("")
+          lines.append("---")
+          lines.append("")
+          
+          entry = "\n".join(lines)
+          
+          # Update history README
+          if os.path.exists(history_readme):
+              with open(history_readme) as f:
+                  content = f.read()
+              
+              marker = '## 📥 Download History'
+              if marker in content:
+                  parts = content.split(marker, 1)
+                  new_content = parts[0] + marker + '\n\n' + entry + parts[1]
+              else:
+                  new_content = content + '\n' + entry
+          else:
+              new_content = f"""# 📥 Torrent Download History
+
+          All times in **Tehran timezone (IR)**.
+
+          ## 📥 Download History
+
+          {entry}
+          """
+          
+          with open(history_readme, 'w') as f:
+              f.write(new_content)
+          
+          print("✅ History updated successfully!")
+          PYEOF
+          
+          # Export variables and run the Python script
+          export MANIFEST_FILE="$MANIFEST_FILE"
+          export REPO="$REPO"
+          export BRANCH="$BRANCH"
+          export DOWNLOAD_DIR="$DOWNLOAD_DIR"
+          export TORRENT_URL="$TORRENT_URL"
+          export TEHRAN_TIME="$TEHRAN_TIME"
+          export HIS
