@@ -570,7 +570,9 @@ jobs:
                 cat /dev/shm/batch_files.txt | xargs -d '\n' git add --sparse
                 git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
                 git pull --rebase origin ${{ github.ref_name }} || git pull origin ${{ github.ref_name }}
-                sleep $((2 + RANDOM % 4))
+                if [ $CURRENT_BATCH_SIZE -gt 900 ]; then
+                  sleep $((2 + RANDOM % 4))
+                fi
                 git push
                 BATCH_NUM=$((BATCH_NUM + 1)); CURRENT_BATCH_SIZE=0; > /dev/shm/batch_files.txt
               fi
@@ -582,7 +584,9 @@ jobs:
               cat /dev/shm/batch_files.txt | xargs -d '\n' git add --sparse
               git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
               git pull --rebase origin ${{ github.ref_name }} || git pull origin ${{ github.ref_name }}
-              sleep $((2 + RANDOM % 4))
+              if [ $CURRENT_BATCH_SIZE -gt 900 ]; then
+                sleep $((2 + RANDOM % 4))
+              fi
               git push
             fi
             rm -f /dev/shm/batch_files.txt
