@@ -1,0 +1,11 @@
+{
+  "timestamp": "20260512_132108",
+  "url": "magnet:?xt=urn:btih:e08c2c4a760ff1301e59c5bf4394c53465f6e5f8&dn=%5bTrix%5d%20Kusuriya%20no%20Hitorigoto%20S02E22%20(WEB%201080p%20AV1%20E-AC3)%20%5bMulti%20Subs%5d%20%5bF1A36AF5%5d.mkv&tr=http%3a%2f%2fnyaa.tracker.wf%3a7777%2fannounce&tr=udp%3a%2f%2fopen.stealth.si%3a80%2fannounce&tr=udp%3a%2f%2ftracker.opentrackr.org%3a1337%2fannounce&tr=udp%3a%2f%2fexodus.desync.com%3a6969%2fannounce&tr=udp%3a%2f%2ftracker.torrent.eu.org%3a451%2fannounce",
+  "mode": "Torrent - Zip Entire Folder",
+  "download_dir": "downloads/20260512_132108__Trix__Kusuriya_no_Hitorigoto_S02E22__WEB_1080p_AV1_E-AC3___Multi_Subs___F1A36AF5_.mkv",
+  "files": [
+    {"path": "[Trix] Kusuriya no Hitorigoto S02E22 (WEB 1080p AV1 E-AC3) [Multi Subs] [F1A36AF5].mkv.7z.001", "size": 99614720, "size_human": "95M", "sha256": "799e09f9270b0e6ab20cce892fc81cb6528a38fbebd9e5d5488991e33b65aaf3"}
+,
+    {"path": "[Trix] Kusuriya no Hitorigoto S02E22 (WEB 1080p AV1 E-AC3) [Multi Subs] [F1A36AF5].mkv.7z.002", "size": 73749086, "size_human": "71M", "sha256": "b7aea3bbfb67d4a80ce82fc3e30db0d7007e7d3198ec00540de9d43354805c87"}
+  ]
+}
