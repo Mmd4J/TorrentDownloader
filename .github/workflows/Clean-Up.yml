@@ -21,68 +21,69 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
+
       - name: Clean Everything
         if: github.event.inputs.target == 'Clean Everything'
         run: |
-          git clone --depth=1 --no-checkout https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo
-          cd repo
-          git rm -r --cached downloads/ history/ 2>/dev/null
-          git commit -m "Clean everything" || exit 0
-          git push
-          echo "Everything cleaned."
+          rm -rf downloads history
+          mkdir -p downloads history
+          touch downloads/.gitkeep
+          git add -A downloads/ history/
+          git commit -m "Clean everything" || echo "Nothing to commit"
+          git push || echo "Nothing to push"
 
       - name: Clean Downloads Only
         if: github.event.inputs.target == 'Clean Downloads Only'
         run: |
-          git clone --depth=1 --no-checkout https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo
-          cd repo
-          git rm -r --cached downloads/ 2>/dev/null
-          git commit -m "Clean downloads" || exit 0
-          git push
-          echo "Downloads cleaned."
+          rm -rf downloads
+          mkdir -p downloads
+          touch downloads/.gitkeep
+          git add -A downloads/
+          git commit -m "Clean downloads" || echo "Nothing to commit"
+          git push || echo "Nothing to push"
 
       - name: Clean History Only
         if: github.event.inputs.target == 'Clean History Only'
         run: |
-          git clone --depth=1 --no-checkout https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo
-          cd repo
-          git rm -r --cached history/ 2>/dev/null
-          git commit -m "Clean history" || exit 0
-          git push
-          echo "History cleaned."
+          rm -rf history
+          mkdir -p history
+          git add -A history/
+          git commit -m "Clean history" || echo "Nothing to commit"
+          git push || echo "Nothing to push"
 
       - name: Keep Last 3 Downloads
         if: github.event.inputs.target == 'Keep Last 3 Downloads'
         run: |
-          git clone --depth=1 --no-checkout https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo
-          cd repo
-          git checkout HEAD -- downloads/
           DIRS=$(find downloads -maxdepth 1 -type d ! -name 'downloads' | sort -r)
           COUNT=0
           for dir in $DIRS; do
             COUNT=$((COUNT + 1))
             if [ $COUNT -gt 3 ]; then
-              git rm -r --cached "$dir" 2>/dev/null
+              echo "Removing: $dir"
+              rm -rf "$dir"
             fi
           done
-          git commit -m "Keep last 3 downloads" || exit 0
-          git push
-          echo "Kept last 3 downloads."
+          git add -A downloads/
+          git commit -m "Keep last 3 downloads" || echo "Nothing to commit"
+          git push || echo "Nothing to push"
 
       - name: Keep Last 5 Downloads
         if: github.event.inputs.target == 'Keep Last 5 Downloads'
         run: |
-          git clone --depth=1 --no-checkout https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git repo
-          cd repo
-          git checkout HEAD -- downloads/
           DIRS=$(find downloads -maxdepth 1 -type d ! -name 'downloads' | sort -r)
           COUNT=0
           for dir in $DIRS; do
             COUNT=$((COUNT + 1))
             if [ $COUNT -gt 5 ]; then
-              git rm -r --cached "$dir" 2>/dev/null
+              echo "Removing: $dir"
+              rm -rf "$dir"
             fi
           done
-          git commit -m "Keep last 5 downloads" || exit 0
-          git push
-          echo "Kept last 5 downloads."
+          git add -A downloads/
+          git commit -m "Keep last 5 downloads" || echo "Nothing to commit"
+          git push || echo "Nothing to push"
