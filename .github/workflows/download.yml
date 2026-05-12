@@ -480,9 +480,6 @@ jobs:
           rm -rf .temp
           git sparse-checkout add downloads/
           
-          # Pull latest changes first
-          git pull --rebase origin ${{ github.ref_name }}
-          
           DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
           BATCH_SIZE_MB=500
           echo "Preparing batched commits..."
@@ -500,8 +497,10 @@ jobs:
               if [ $((CURRENT_BATCH_SIZE + FILE_SIZE_MB)) -gt $BATCH_SIZE_MB ] && [ -s /tmp/batch_files.txt ]; then
                 echo "Pushing batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
                 cat /tmp/batch_files.txt | xargs -d '\n' git add --sparse
-                git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
+                git stash
                 git pull --rebase origin ${{ github.ref_name }}
+                git stash pop
+                git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
                 git push
                 BATCH_NUM=$((BATCH_NUM + 1)); CURRENT_BATCH_SIZE=0; > /tmp/batch_files.txt
               fi
@@ -511,8 +510,10 @@ jobs:
             if [ -s /tmp/batch_files.txt ]; then
               echo "Pushing final batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
               cat /tmp/batch_files.txt | xargs -d '\n' git add --sparse
-              git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
+              git stash
               git pull --rebase origin ${{ github.ref_name }}
+              git stash pop
+              git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
               git push
             fi
             rm -f /tmp/batch_files.txt
@@ -521,8 +522,10 @@ jobs:
           if git diff --cached --quiet; then
             echo "Nothing to commit"
           else
-            git commit -m "Update history: ${{ steps.download.outputs.timestamp }}"
+            git stash
             git pull --rebase origin ${{ github.ref_name }}
+            git stash pop
+            git commit -m "Update history: ${{ steps.download.outputs.timestamp }}"
             git push
           fi
           echo "DONE!"
