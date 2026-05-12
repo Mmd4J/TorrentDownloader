@@ -70,14 +70,31 @@ jobs:
       - name: Install dependencies (updates every 7 days)
         run: |
           TIMESTAMP_FILE="/home/runner/.apt_timestamp/last_update"
-        run: |
-          if command -v aria2c &> /dev/null && command -v 7z &> /dev/null && command -v jq &> /dev/null; then
-            echo "All dependencies already installed, skipping."
+          SHOULD_UPDATE=false
+          
+          if [ -f "$TIMESTAMP_FILE" ]; then
+            LAST_UPDATE=$(cat "$TIMESTAMP_FILE")
+            NOW=$(date +%s)
+            DAYS_OLD=$(( (NOW - LAST_UPDATE) / 86400 ))
+            if [ $DAYS_OLD -gt 7 ]; then
+              echo "Last update was $DAYS_OLD days ago, refreshing..."
+              SHOULD_UPDATE=true
+            fi
           else
+            SHOULD_UPDATE=true
+          fi
+          
+          if [ "$SHOULD_UPDATE" = true ]; then
             sudo apt-get update -qq
             sudo apt-get install -y aria2 p7zip-full p7zip-rar curl jq python3
+            mkdir -p /home/runner/.apt_timestamp
+            date +%s > "$TIMESTAMP_FILE"
+            echo "Dependencies installed fresh. Timestamp updated."
+          else
+            sudo apt-get install -y aria2 p7zip-full p7zip-rar curl jq python3
+            echo "Dependencies installed from cache (last updated $DAYS_OLD days ago)."
           fi
-
+          
       - name: Check existing downloads via manifest
         if: github.event.inputs.mode != 'Upload as Artifact'
         id: check_existing
