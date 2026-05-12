@@ -1,0 +1,165 @@
+name: Fix Torrent Downloader Workflow
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      
+      - name: Fix the workflow file
+        run: |
+          WORKFLOW_FILE=".github/workflows/torrent-downloader.yml"
+          
+          if [ ! -f "$WORKFLOW_FILE" ]; then
+            echo "❌ Workflow file not found!"
+            exit 1
+          fi
+          
+          echo "📝 Backing up original workflow..."
+          cp "$WORKFLOW_FILE" "${WORKFLOW_FILE}.backup"
+          
+          echo "🔧 Applying fix for file paths with spaces..."
+          
+          python3 << 'PYEOF'
+          import re
+          
+          workflow_file = ".github/workflows/torrent-downloader.yml"
+          
+          with open(workflow_file, 'r') as f:
+              content = f.read()
+          
+          # Find the "Commit and push changes" step and replace the file handling part
+          old_pattern = r'(NEW_FILES=\$\(git ls-files --others --exclude-standard "\$DOWNLOAD_DIR" 2>/dev/null\)\n.*?MODIFIED_FILES=\$\(git diff --name-only "\$DOWNLOAD_DIR" 2>/dev/null\)\n.*?ALL_FILES=\$\(echo -e "\$NEW_FILES\\n\$MODIFIED_FILES" \| sort -u \| grep -v '\^\$'\)\n.*?if \[ -z "\$ALL_FILES" \]; then\n.*?echo "No new files to commit"\n.*?else\n.*?CURRENT_BATCH_SIZE=0\n.*?BATCH_NUM=1\n.*?BATCH_FILES=""\n.*?while IFS= read -r file; do\n.*?\[ -z "\$file" \] && continue\n.*?if \[ -f "\$file" \]; then\n.*?FILE_SIZE=\$\(stat -c%s "\$file" 2>/dev/null\)\n.*?FILE_SIZE_MB=\$\(\(FILE_SIZE / 1048576\)\)\n.*?else\n.*?FILE_SIZE_MB=0\n.*?fi\n.*?if \[ \$\(\(CURRENT_BATCH_SIZE \+ FILE_SIZE_MB\)\) -gt \$BATCH_SIZE_MB \] && \[ -n "\$BATCH_FILES" \]; then\n.*?echo "📤 Pushing batch \$BATCH_NUM \(~\$CURRENT_BATCH_SIZE MB\)"\n.*?git add \$BATCH_FILES\n.*?git commit -m "📥 Download.*?\(Batch \$BATCH_NUM\)" \|\| true\n.*?git push\n.*?BATCH_NUM=\$\(\(BATCH_NUM \+ 1\)\)\n.*?CURRENT_BATCH_SIZE=0\n.*?BATCH_FILES=""\n.*?fi\n.*?BATCH_FILES="\$BATCH_FILES \$file"\n.*?CURRENT_BATCH_SIZE=\$\(\(CURRENT_BATCH_SIZE \+ FILE_SIZE_MB\)\)\n.*?done <<< "\$ALL_FILES"\n.*?if \[ -n "\$BATCH_FILES" \]; then\n.*?echo "📤 Pushing final batch \$BATCH_NUM \(~\$CURRENT_BATCH_SIZE MB\)"\n.*?git add \$BATCH_FILES\n.*?git commit -m "📥 Download.*?\(Batch \$BATCH_NUM\)" \|\| true\n.*?git push\n.*?fi\n.*?fi)'
+          
+          replacement = '''NEW_FILES=$(git ls-files --others --exclude-standard "$DOWNLOAD_DIR" 2>/dev/null)
+          MODIFIED_FILES=$(git diff --name-only "$DOWNLOAD_DIR" 2>/dev/null)
+          ALL_FILES=$(echo -e "$NEW_FILES\\n$MODIFIED_FILES" | sort -u | grep -v '^$')
+          
+          if [ -z "$ALL_FILES" ]; then
+            echo "No new files to commit"
+          else
+            CURRENT_BATCH_SIZE=0
+            BATCH_NUM=1
+            > /tmp/batch_files.txt
+            
+            while IFS= read -r file; do
+              [ -z "$file" ] && continue
+              
+              if [ -f "$file" ]; then
+                FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
+                FILE_SIZE_MB=$((FILE_SIZE / 1048576))
+              else
+                FILE_SIZE_MB=0
+              fi
+              
+              if [ $((CURRENT_BATCH_SIZE + FILE_SIZE_MB)) -gt $BATCH_SIZE_MB ] && [ -s /tmp/batch_files.txt ]; then
+                echo "📤 Pushing batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
+                cat /tmp/batch_files.txt | xargs -d '\\n' git add
+                git commit -m "📥 Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || true
+                git push
+                
+                BATCH_NUM=$((BATCH_NUM + 1))
+                CURRENT_BATCH_SIZE=0
+                > /tmp/batch_files.txt
+              fi
+              
+              echo "$file" >> /tmp/batch_files.txt
+              CURRENT_BATCH_SIZE=$((CURRENT_BATCH_SIZE + FILE_SIZE_MB))
+            done <<< "$ALL_FILES"
+            
+            if [ -s /tmp/batch_files.txt ]; then
+              echo "📤 Pushing final batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
+              cat /tmp/batch_files.txt | xargs -d '\\n' git add
+              git commit -m "📥 Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || true
+              git push
+            fi
+            
+            rm -f /tmp/batch_files.txt
+          fi'''
+          
+          # Try regex replacement first
+          new_content = re.sub(old_pattern, replacement, content, flags=re.DOTALL)
+          
+          if new_content == content:
+              print("⚠️ Regex didn't match, trying simpler approach...")
+              # Fallback: replace specific lines
+              lines = content.split('\n')
+              new_lines = []
+              skip_until_push = False
+              
+              for i, line in enumerate(lines):
+                  if 'BATCH_FILES=""' in line and 'CURRENT_BATCH_SIZE' in lines[i-1] if i > 0 else False:
+                      # Start of the problematic section
+                      new_lines.append('            > /tmp/batch_files.txt')
+                      new_lines.append('            ')
+                      skip_until_push = True
+                      continue
+                  
+                  if skip_until_push:
+                      if 'BATCH_FILES="$BATCH_FILES $file"' in line:
+                          new_lines.append('              echo "$file" >> /tmp/batch_files.txt')
+                          continue
+                      elif 'git add $BATCH_FILES' in line:
+                          new_lines.append('                cat /tmp/batch_files.txt | xargs -d \'\\n\' git add')
+                          continue
+                      elif 'BATCH_FILES=""' in line:
+                          new_lines.append('                > /tmp/batch_files.txt')
+                          continue
+                      elif 'if [ -n "$BATCH_FILES" ]; then' in line:
+                          new_lines.append('            if [ -s /tmp/batch_files.txt ]; then')
+                          continue
+                      elif 'rm -rf .temp' in line and i > 0:
+                          skip_until_push = False
+                  
+                  new_lines.append(line)
+              
+              new_content = '\n'.join(new_lines)
+          
+          with open(workflow_file, 'w') as f:
+              f.write(new_content)
+          
+          print("✅ Workflow file updated!")
+          PYEOF
+          
+          echo "🔍 Checking for changes..."
+          if git diff --quiet "$WORKFLOW_FILE"; then
+            echo "⚠️ No changes were made"
+          else
+            echo "✅ Changes applied successfully!"
+            git diff "$WORKFLOW_FILE"
+          fi
+      
+      - name: Commit and push fix
+        run: |
+          WORKFLOW_FILE=".github/workflows/torrent-downloader.yml"
+          
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          git add "$WORKFLOW_FILE"
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "🔧 Fix: Handle file paths with spaces in batch commits"
+            git push
+            echo ""
+            echo "==========================================="
+            echo "✅ Workflow fixed and pushed!"
+            echo "==========================================="
+          fi
+      
+      - name: Cleanup backup
+        run: |
+          rm -f .github/workflows/torrent-downloader.yml.backup
