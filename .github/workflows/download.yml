@@ -351,12 +351,12 @@ jobs:
           done
           echo "  ]" >> "${REPORT_DIR}/manifest.json"
           echo "}" >> "${REPORT_DIR}/manifest.json"
+
       - name: Update history
         if: github.event.inputs.mode != 'Torrent - Show Info Only'
         run: |
           export TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
           
-          # Write Python script to a file
           cat > /tmp/update_history.py << 'SCRIPTEND'
           import json, urllib.parse, os, re
           from collections import defaultdict
@@ -466,10 +466,9 @@ jobs:
           with open(history_readme, 'w') as f:
               f.write(new_content)
           
-          print("✅ History updated!")
+          print("History updated!")
           SCRIPTEND
           
-          # Export all variables
           export TIMESTAMP="${{ steps.download.outputs.timestamp }}"
           export REPO="${{ github.repository }}"
           export BRANCH="${{ github.ref_name }}"
@@ -477,8 +476,9 @@ jobs:
           export TORRENT_URL="${{ github.event.inputs.url }}"
           export MODE="${{ github.event.inputs.mode }}"
           
-          # Run the script
-          python3 /tmp/update_history.py      - name: Commit and push changes
+          python3 /tmp/update_history.py
+
+      - name: Commit and push changes
         if: github.event.inputs.mode != 'Torrent - Show Info Only'
         run: |
           git config --local user.email "action@github.com"
@@ -486,10 +486,10 @@ jobs:
           rm -rf .temp
           git sparse-checkout add downloads/
           
-          # Always commit history and .github first (small files, won't conflict)
+          # Commit history first
           git add .github/ history/
           if git diff --cached --quiet; then
-            echo "No history changes to commit"
+            echo "No history changes"
           else
             git commit -m "Update history: ${{ steps.download.outputs.timestamp }}"
           fi
@@ -529,6 +529,5 @@ jobs:
             rm -f /tmp/batch_files.txt
           fi
           
-          # Push everything including history
           git push origin ${{ github.ref_name }}
           echo "DONE!"
