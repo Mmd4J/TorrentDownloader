@@ -274,18 +274,42 @@ jobs:
             ls "${FOLDER_NAME}.zip".* >/dev/null 2>&1 || 7z a -tzip -mx0 "${FOLDER_NAME}.zip" "$MAIN_FOLDER" && rm -rf "$MAIN_FOLDER"
           fi
       
-      - name: Split large files
-        if: github.event.inputs.mode != 'Torrent - Show Info Only'
-        run: |
+            - name: Split large files
+              if: github.event.inputs.mode != 'Torrent - Show Info Only'
+              run: |
           DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
           SPLIT_SIZE_MB="${{ github.event.inputs.split_size }}"
+          SPLIT_SIZE=$((SPLIT_SIZE_MB * 1048576))
+          
+          echo "Checking for files larger than ${SPLIT_SIZE_MB}MB..."
+          
           find "$DOWNLOAD_DIR" -type f ! -name "*.7z.*" -print0 | while IFS= read -r -d '' file; do
             FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
             BASENAME=$(basename "$file")
             DIRNAME=$(dirname "$file")
-            ls "${DIRNAME}/${BASENAME}.7z."* >/dev/null 2>&1 && continue
-            [ "$FILE_SIZE" -gt $((SPLIT_SIZE_MB * 1048576)) ] && 7z a -v${SPLIT_SIZE_MB}m -mx0 "${DIRNAME}/${BASENAME}.7z" "$file" && rm "$file"
+            
+            # Check if already split - suppress errors if no matches
+            if compgen -G "${DIRNAME}/${BASENAME}.7z.*" > /dev/null 2>&1; then
+              echo "Already split: $BASENAME"
+              continue
+            fi
+            
+            if [ "$FILE_SIZE" -gt "$SPLIT_SIZE" ]; then
+              SIZE_HUMAN=$(numfmt --to=iec $FILE_SIZE 2>/dev/null || echo "${FILE_SIZE} bytes")
+              echo "Splitting: $BASENAME ($SIZE_HUMAN)"
+              
+              7z a -v${SPLIT_SIZE_MB}m -mx0 "${DIRNAME}/${BASENAME}.7z" "$file"
+              
+              if [ $? -eq 0 ]; then
+                echo "  Split successful, removing original"
+                rm "$file"
+              else
+                echo "  Split failed, keeping original"
+              fi
+            fi
           done
+          
+          echo "Done checking for large files."
       
       - name: Generate report
         if: github.event.inputs.mode != 'Torrent - Show Info Only'
