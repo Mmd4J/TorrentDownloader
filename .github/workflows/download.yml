@@ -1,4 +1,4 @@
- name: Torrent Downloader
+name: Torrent Downloader
 
 on:
   workflow_dispatch:
