@@ -424,6 +424,33 @@ jobs:
           entry_lines.append("---")
           entry_lines.append("")
           
+          # Add storage stats line at top
+          total_bytes = 0
+          entry_count = 0
+          for item in os.listdir("history"):
+              mf_path = os.path.join("history", item, "manifest.json")
+              if os.path.isfile(mf_path):
+                  entry_count += 1
+                  try:
+                      with open(mf_path) as mf:
+                          data = json.load(mf)
+                          total_bytes += sum(f['size'] for f in data.get('files', []))
+                  except:
+                      pass
+          
+          if total_bytes >= 1073741824:
+              size_str = f"{total_bytes/1073741824:.1f}GB"
+          elif total_bytes >= 1048576:
+              size_str = f"{total_bytes/1048576:.0f}MB"
+          elif total_bytes >= 1024:
+              size_str = f"{total_bytes//1024}KB"
+          else:
+              size_str = f"{total_bytes}B"
+          
+          storage_line = f"> 💾 {size_str} | {entry_count} downloads"
+          entry_lines.insert(0, storage_line)
+          entry_lines.insert(1, "")
+          
           entry = "\n".join(entry_lines)
           
           with open(links_file, 'w') as f:
@@ -472,8 +499,8 @@ jobs:
           fi
           
           DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
-          BATCH_SIZE_MB=500
-          echo "Preparing batched commits..."
+          BATCH_SIZE_MB=1000
+          echo "Preparing batched commits (${BATCH_SIZE_MB}MB per batch)..."
           NEW_FILES=$(git ls-files --others --exclude-standard "$DOWNLOAD_DIR" 2>/dev/null)
           MODIFIED_FILES=$(git diff --name-only "$DOWNLOAD_DIR" 2>/dev/null)
           ALL_FILES=$(echo -e "$NEW_FILES\n$MODIFIED_FILES" | sort -u | grep -v '^$')
@@ -490,6 +517,7 @@ jobs:
                 cat /dev/shm/batch_files.txt | xargs -d '\n' git add --sparse
                 git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
                 git pull --rebase origin ${{ github.ref_name }} || git pull origin ${{ github.ref_name }}
+                sleep $((2 + RANDOM % 4))
                 git push
                 BATCH_NUM=$((BATCH_NUM + 1)); CURRENT_BATCH_SIZE=0; > /dev/shm/batch_files.txt
               fi
@@ -501,6 +529,7 @@ jobs:
               cat /dev/shm/batch_files.txt | xargs -d '\n' git add --sparse
               git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
               git pull --rebase origin ${{ github.ref_name }} || git pull origin ${{ github.ref_name }}
+              sleep $((2 + RANDOM % 4))
               git push
             fi
             rm -f /dev/shm/batch_files.txt
