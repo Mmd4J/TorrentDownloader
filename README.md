@@ -30,7 +30,7 @@ A GitHub Actions-powered downloader that supports torrents, magnets, and direct 
 | **Torrent - Preserve Structure** | Keeps original torrent folder hierarchy |
 | **Torrent - Zip Entire Folder** | Zips entire folder, splits the zip if >95MB |
 | **Torrent - Show Info Only** | Preview torrent contents without downloading |
-| **Upload as Artifact** | Upload as GitHub Artifact (90-day retention, no splitting)[not whitelisted in iran] |
+| **Upload as Artifact** | Upload as GitHub Artifact (90-day retention, no splitting)[with a workaround] |
 
 ## 🔧 How to Use
 
@@ -50,6 +50,15 @@ A GitHub Actions-powered downloader that supports torrents, magnets, and direct 
 
 5. Click **Run workflow**
 
+## Artifact
+You can send the Artifact link to https://urldl.ir/ 
+if you forgot to copy the artifact link in the workflow or you just want to copy it again 
+1. Go to the **Actions** tab
+2. Select **Torrent Downloader**
+3. Click on the workflow that used the Artifacts mode
+4. Scroll Down until you see the Artifacs Section
+5. copy the link of your artifact
+6. MAKE SURE TO NOT SHARE THE MAIN ARTIFACT LINK WITH A LOT of PEOPLE AND DONT USE ARTIFACTS REGULARLY , YOUR ACCOUNT MIGHT GET FLAGGED
 ## 📜 Viewing Downloads
 
 After the workflow completes:
