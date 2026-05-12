@@ -256,7 +256,7 @@ jobs:
               aria2c --dir="${DOWNLOAD_DIR}" --out="torrent.torrent" "${{ github.event.inputs.url }}"
               ARIA2_INPUT="${DOWNLOAD_DIR}/torrent.torrent"
             fi
-            [ "$MODE" = "Torrent - Preserve Structure" ] || [ "$MODE" = "Torrent - Zip Entire Folder" ] && STRUCTURE_OPTION="--bt-preserve-tree=true" || STRUCTURE_OPTION=""
+            [ "$MODE" = "Torrent - Preserve Structure" ] || [ "$MODE" = "Torrent - Zip Entire Folder" ] || STRUCTURE_OPTION=""
             aria2c --seed-time=0 \
                    --max-connection-per-server=${{ github.event.inputs.max_connections }} \
                    --split=${{ github.event.inputs.max_connections }} \
