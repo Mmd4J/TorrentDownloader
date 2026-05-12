@@ -69,7 +69,7 @@ After the workflow completes:
    ```bash
    7z x filename.7z.001
    
-##🗑️ Cleanup
+## 🗑️ Cleanup
 Use the Cleanup Downloads & History workflow to free space:
 
 Clean Everything - Remove all downloads and history
@@ -80,7 +80,7 @@ Clean History Only - Clear history entries
 
 Keep Last 3/5 Downloads - Remove older downloads
 
-##⚠️ Limits
+## ⚠️ Limits
 Limit	Value
 -----------------------------------------------------
 Individual file size	100 MB (files split at 95MB)
