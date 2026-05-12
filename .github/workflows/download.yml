@@ -50,9 +50,8 @@ permissions:
 jobs:
   download:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout history only (fast)
+      - name: Checkout history only
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -61,8 +60,8 @@ jobs:
             .gitattributes
             history/
           sparse-checkout-cone-mode: false
-      
-      - name: Check existing downloads from history
+
+      - name: Check existing downloads via manifest
         id: check_existing
         run: |
           MODE="${{ github.event.inputs.mode }}"
@@ -82,7 +81,6 @@ jobs:
               CLEAN_NAME=$(echo "$CLEAN_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c1-100)
             fi
           fi
-          echo "Looking for existing downloads matching: $CLEAN_NAME"
           EXISTING_DIR=""
           EXISTING_TIMESTAMP=""
           if [ -d "history" ]; then
@@ -93,7 +91,7 @@ jobs:
                 if [ "$MANIFEST_URL" = "$TORRENT_URL" ] || echo "$MANIFEST_DIR" | grep -q "_${CLEAN_NAME}$"; then
                   EXISTING_DIR="$MANIFEST_DIR"
                   EXISTING_TIMESTAMP=$(jq -r '.timestamp' "$MANIFEST" 2>/dev/null)
-                  echo "Found existing download: $EXISTING_DIR"
+                  echo "Found existing: $EXISTING_DIR"
                   break
                 fi
               fi
@@ -107,8 +105,8 @@ jobs:
             echo "status=new" >> $GITHUB_OUTPUT
           fi
           echo "clean_name=${CLEAN_NAME}" >> $GITHUB_OUTPUT
-      
-      - name: Full checkout for resume
+
+      - name: Full checkout if resuming
         if: steps.check_existing.outputs.status == 'resuming'
         uses: actions/checkout@v4
         with:
@@ -119,8 +117,8 @@ jobs:
             history/
             ${{ steps.check_existing.outputs.existing_dir }}/
           sparse-checkout-cone-mode: false
-      
-      - name: Configure git for large files
+
+      - name: Configure git for binaries
         run: |
           cat >> .gitattributes << 'EOF'
           *.7z.* -delta
@@ -136,22 +134,22 @@ jobs:
           EOF
           git config core.compression 0
           git config pack.compression 0
-      
+
       - name: Cache apt packages
         uses: actions/cache@v4
         with:
           path: /var/cache/apt/archives
           key: apt-cache-${{ runner.os }}
           restore-keys: apt-cache-
-      
+
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y aria2 p7zip-full p7zip-rar wget curl jq python3
-      
+
       - name: Create directories
         run: mkdir -p downloads history .temp
-      
+
       - name: Cache torrent metadata
         if: contains(github.event.inputs.mode, 'Torrent')
         id: torrent_cache
@@ -159,7 +157,7 @@ jobs:
         with:
           path: .temp/torrent_cache
           key: torrent-meta-${{ github.event.inputs.url }}
-      
+
       - name: Get torrent info
         if: contains(github.event.inputs.mode, 'Torrent')
         id: torrent_info
@@ -196,7 +194,7 @@ jobs:
             done < ".temp/parsed_files.txt"
             echo "torrent_file=${TORRENT_FILE}" >> $GITHUB_OUTPUT
           fi
-      
+
       - name: Show torrent info only
         if: github.event.inputs.mode == 'Torrent - Show Info Only'
         run: |
@@ -217,7 +215,7 @@ jobs:
           git add history/
           git commit -m "Torrent info: ${TIMESTAMP}" || echo "Nothing to commit"
           git push
-      
+
       - name: Determine files to download
         if: contains(github.event.inputs.mode, 'Torrent') && github.event.inputs.mode != 'Torrent - Show Info Only'
         id: file_selection
@@ -232,7 +230,7 @@ jobs:
             done
             [ ${#ARIA2_INDEXES[@]} -gt 0 ] && echo "select_option=--select-file=$(IFS=','; echo "${ARIA2_INDEXES[*]}")" >> $GITHUB_OUTPUT
           fi
-      
+
       - name: Download files
         if: github.event.inputs.mode != 'Torrent - Show Info Only'
         id: download
@@ -263,7 +261,7 @@ jobs:
           fi
           echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
           echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
-      
+
       - name: Zip entire folder
         if: github.event.inputs.mode == 'Torrent - Zip Entire Folder'
         run: |
@@ -273,44 +271,29 @@ jobs:
             FOLDER_NAME=$(basename "$MAIN_FOLDER")
             ls "${FOLDER_NAME}.zip".* >/dev/null 2>&1 || 7z a -tzip -mx0 "${FOLDER_NAME}.zip" "$MAIN_FOLDER" && rm -rf "$MAIN_FOLDER"
           fi
-      
-            - name: Split large files
-              if: github.event.inputs.mode != 'Torrent - Show Info Only'
-              run: |
+
+      - name: Split large files
+        if: github.event.inputs.mode != 'Torrent - Show Info Only'
+        run: |
           DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
           SPLIT_SIZE_MB="${{ github.event.inputs.split_size }}"
           SPLIT_SIZE=$((SPLIT_SIZE_MB * 1048576))
-          
           echo "Checking for files larger than ${SPLIT_SIZE_MB}MB..."
-          
           find "$DOWNLOAD_DIR" -type f ! -name "*.7z.*" -print0 | while IFS= read -r -d '' file; do
             FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
             BASENAME=$(basename "$file")
             DIRNAME=$(dirname "$file")
-            
-            # Check if already split - suppress errors if no matches
             if compgen -G "${DIRNAME}/${BASENAME}.7z.*" > /dev/null 2>&1; then
               echo "Already split: $BASENAME"
               continue
             fi
-            
             if [ "$FILE_SIZE" -gt "$SPLIT_SIZE" ]; then
-              SIZE_HUMAN=$(numfmt --to=iec $FILE_SIZE 2>/dev/null || echo "${FILE_SIZE} bytes")
-              echo "Splitting: $BASENAME ($SIZE_HUMAN)"
-              
-              7z a -v${SPLIT_SIZE_MB}m -mx0 "${DIRNAME}/${BASENAME}.7z" "$file"
-              
-              if [ $? -eq 0 ]; then
-                echo "  Split successful, removing original"
-                rm "$file"
-              else
-                echo "  Split failed, keeping original"
-              fi
+              echo "Splitting: $BASENAME"
+              7z a -v${SPLIT_SIZE_MB}m -mx0 "${DIRNAME}/${BASENAME}.7z" "$file" && rm "$file"
             fi
           done
-          
-          echo "Done checking for large files."
-      
+          echo "Done."
+
       - name: Generate report
         if: github.event.inputs.mode != 'Torrent - Show Info Only'
         run: |
@@ -330,7 +313,7 @@ jobs:
             echo "{\"path\":\"${REL_PATH}\",\"size\":${FILE_SIZE},\"size_human\":\"${SIZE_HUMAN}\",\"sha256\":\"${FILE_HASH}\"}" >> "${REPORT_DIR}/manifest.json"
           done
           echo "]}" >> "${REPORT_DIR}/manifest.json"
-      
+
       - name: Update history
         if: github.event.inputs.mode != 'Torrent - Show Info Only'
         run: |
@@ -382,50 +365,46 @@ jobs:
           open(os.environ['HISTORY_README'],'w').write(nc)
           print('History updated!')
           "
-      
+
       - name: Commit and push changes
         if: github.event.inputs.mode != 'Torrent - Show Info Only'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          git sparse-checkout add downloads/
           rm -rf .temp
           DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
           BATCH_SIZE_MB=500
-          echo "Preparing batched commits (${BATCH_SIZE_MB}MB per batch)..."
+          echo "Preparing batched commits..."
           NEW_FILES=$(git ls-files --others --exclude-standard "$DOWNLOAD_DIR" 2>/dev/null)
           MODIFIED_FILES=$(git diff --name-only "$DOWNLOAD_DIR" 2>/dev/null)
           ALL_FILES=$(echo -e "$NEW_FILES\n$MODIFIED_FILES" | sort -u | grep -v '^$')
           if [ -z "$ALL_FILES" ]; then
             echo "No new files to commit"
           else
-            CURRENT_BATCH_SIZE=0
-            BATCH_NUM=1
-            > /tmp/batch_files.txt
+            CURRENT_BATCH_SIZE=0; BATCH_NUM=1; > /tmp/batch_files.txt
             while IFS= read -r file; do
               [ -z "$file" ] && continue
               FILE_SIZE=$(stat -c%s "$file" 2>/dev/null || echo 0)
               FILE_SIZE_MB=$((FILE_SIZE / 1048576))
               if [ $((CURRENT_BATCH_SIZE + FILE_SIZE_MB)) -gt $BATCH_SIZE_MB ] && [ -s /tmp/batch_files.txt ]; then
                 echo "Pushing batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
-                cat /tmp/batch_files.txt | xargs -d '\n' git add
+                cat /tmp/batch_files.txt | xargs -d '\n' git add --sparse
                 git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || true
                 git push
-                BATCH_NUM=$((BATCH_NUM + 1))
-                CURRENT_BATCH_SIZE=0
-                > /tmp/batch_files.txt
+                BATCH_NUM=$((BATCH_NUM + 1)); CURRENT_BATCH_SIZE=0; > /tmp/batch_files.txt
               fi
               echo "$file" >> /tmp/batch_files.txt
               CURRENT_BATCH_SIZE=$((CURRENT_BATCH_SIZE + FILE_SIZE_MB))
             done <<< "$ALL_FILES"
             if [ -s /tmp/batch_files.txt ]; then
               echo "Pushing final batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
-              cat /tmp/batch_files.txt | xargs -d '\n' git add
+              cat /tmp/batch_files.txt | xargs -d '\n' git add --sparse
               git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || true
               git push
             fi
             rm -f /tmp/batch_files.txt
           fi
-          echo "Pushing history"
           git add history/
           git commit -m "Update history: ${{ steps.download.outputs.timestamp }}" || echo "Nothing to commit"
           git push
