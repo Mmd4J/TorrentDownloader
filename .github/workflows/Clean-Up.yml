@@ -31,98 +31,69 @@ jobs:
         if: github.event.inputs.target == 'Clean Everything'
         run: |
           git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          git config --local user.name "DownLord Bot"
           rm -rf downloads history
           mkdir -p downloads history
           touch downloads/.gitkeep
           git add -A downloads/ history/
-          if git diff --cached --quiet; then
-            echo "Nothing to commit"
-          else
-            git commit -m "Clean everything"
-            git push
-            echo "Done."
-          fi
+          git commit -m "🧹 Clean everything" 2>/dev/null || echo "Nothing to clean"
+          git push 2>/dev/null || echo "Nothing to push"
 
       - name: Clean Downloads Only
         if: github.event.inputs.target == 'Clean Downloads Only'
         run: |
           git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          git config --local user.name "DownLord Bot"
           rm -rf downloads
           mkdir -p downloads
           touch downloads/.gitkeep
           git add -A downloads/
-          if git diff --cached --quiet; then
-            echo "Nothing to commit"
-          else
-            git commit -m "Clean downloads"
-            git push
-            echo "Done."
-          fi
+          git commit -m "🧹 Clean downloads" 2>/dev/null || echo "Nothing to clean"
+          git push 2>/dev/null || echo "Nothing to push"
 
       - name: Clean History Only
         if: github.event.inputs.target == 'Clean History Only'
         run: |
           git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          git config --local user.name "DownLord Bot"
           rm -rf history
           mkdir -p history
           git add -A history/
-          if git diff --cached --quiet; then
-            echo "Nothing to commit"
-          else
-            git commit -m "Clean history"
-            git push
-            echo "Done."
-          fi
+          git commit -m "🧹 Clean history" 2>/dev/null || echo "Nothing to clean"
+          git push 2>/dev/null || echo "Nothing to push"
 
       - name: Keep Last 3 Downloads
         if: github.event.inputs.target == 'Keep Last 3 Downloads'
         run: |
           git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          if [ -d "downloads" ]; then
-            DIRS=$(find downloads -maxdepth 1 -type d ! -name 'downloads' | sort -r)
-            COUNT=0
-            for dir in $DIRS; do
-              COUNT=$((COUNT + 1))
-              if [ $COUNT -gt 3 ]; then
-                echo "Removing: $dir"
-                rm -rf "$dir"
-              fi
-            done
-          fi
+          git config --local user.name "DownLord Bot"
+          DIRS=$(find downloads -maxdepth 1 -type d ! -name 'downloads' | sort -r)
+          COUNT=0
+          for dir in $DIRS; do
+            COUNT=$((COUNT + 1))
+            if [ $COUNT -gt 3 ]; then
+              echo "Removing: $dir"
+              rm -rf "$dir"
+            fi
+          done
           git add -A downloads/
-          if git diff --cached --quiet; then
-            echo "Nothing to commit"
-          else
-            git commit -m "Keep last 3 downloads"
-            git push
-            echo "Done."
-          fi
+          git commit -m "🧹 Keep last 3 downloads" 2>/dev/null || echo "Nothing to clean"
+          git push 2>/dev/null || echo "Nothing to push"
 
       - name: Keep Last 5 Downloads
         if: github.event.inputs.target == 'Keep Last 5 Downloads'
         run: |
           git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          if [ -d "downloads" ]; then
-            DIRS=$(find downloads -maxdepth 1 -type d ! -name 'downloads' | sort -r)
-            COUNT=0
-            for dir in $DIRS; do
-              COUNT=$((COUNT + 1))
-              if [ $COUNT -gt 5 ]; then
-                echo "Removing: $dir"
-                rm -rf "$dir"
-              fi
-            done
-          fi
+          git config --local user.name "DownLord Bot"
+          DIRS=$(find downloads -maxdepth 1 -type d ! -name 'downloads' | sort -r)
+          COUNT=0
+          for dir in $DIRS; do
+            COUNT=$((COUNT + 1))
+            if [ $COUNT -gt 5 ]; then
+              echo "Removing: $dir"
+              rm -rf "$dir"
+            fi
+          done
           git add -A downloads/
-          if git diff --cached --quiet; then
-            echo "Nothing to commit"
-          else
-            git commit -m "Keep last 5 downloads"
-            git push
-            echo "Done."
-          fi
+          git commit -m "🧹 Keep last 5 downloads" 2>/dev/null || echo "Nothing to clean"
+          git push 2>/dev/null || echo "Nothing to push"
