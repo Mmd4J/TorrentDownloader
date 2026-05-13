@@ -4,6 +4,21 @@ All times in **Tehran timezone (IR)**.
 
 ## 📥 Download History
 
+> 💾 10MB | 3 downloads
+
+### 📅 2026-05-13 20:43 (Tehran)
+
+**Mode:** Torrent - Flat Files
+
+**Files:**
+
+- 🗜️ [**The Los Angeles BB Murder Cases by Nisioisin.zip**](https://github.com/Mmd4J/TorrentDownloader/raw/refs/heads/main/downloads/20260513_171302_The_Los_Angeles_BB_Murder_Cases_by_Nisioisin.zip/The%20Los%20Angeles%20BB%20Murder%20Cases%20by%20Nisioisin.zip) - 1.2M
+
+[📋 Download All Links](https://github.com/Mmd4J/TorrentDownloader/raw/refs/heads/main/history/20260513_171302/links.txt)
+
+---
+
+
 > 💾 9MB | 2 downloads
 
 ### 📅 2026-05-13 20:39 (Tehran)
