@@ -1,28 +1,50 @@
-name: Torrent Downloader
+name: DownLord
 
 on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'Torrent/Magnet/URL (Separate multiple with space, comma, or new line)'
+        description: 'URL, Magnet, or Torrent (Separate multiple with space, comma, or new line)'
         required: true
         type: string
       mode:
-        description: 'Download Mode'
+        description: 'Mode'
         required: true
         type: choice
         options:
           - 'Torrent - Flat Files'
           - 'Torrent - Preserve Structure'
           - 'Torrent - Zip Entire Folder'
-          - 'Torrent - Show Info Only'
+          - 'Show Info Only'
           - 'Upload as Artifact'
         default: 'Torrent - Flat Files'
-      max_connections:
-        description: 'Max connections per file (default: 16)'
+      video_quality:
+        description: '🎬 Video Quality (for yt-dlp supported sites)'
         required: false
-        type: string
-        default: '16'
+        type: choice
+        options:
+          - 'Best quality'
+          - '1080p'
+          - '720p'
+          - '480p'
+          - 'Audio only'
+          - 'Subtitles only'
+        default: 'Best quality'
+      subtitles:
+        description: '📝 Embed English subtitles'
+        required: false
+        type: boolean
+        default: true
+      auto_subs:
+        description: '🤖 Allow auto-generated subtitles'
+        required: false
+        type: boolean
+        default: false
+      playlist:
+        description: '📋 Download entire playlist (if URL is a playlist)'
+        required: false
+        type: boolean
+        default: false
       select_files:
         description: 'Torrent: Select file indexes (e.g., "1,3,5" or empty for all)'
         required: false
@@ -30,11 +52,6 @@ on:
         default: ''
       file_pattern:
         description: 'Torrent: File pattern (e.g., "*.mkv", "*.mp4" or empty for all)'
-        required: false
-        type: string
-        default: ''
-      output_filename:
-        description: 'Direct Download: Custom filename (optional)'
         required: false
         type: string
         default: ''
@@ -55,22 +72,18 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             .gitattributes
-            history/
             .github/
+            history/
           sparse-checkout-cone-mode: false
 
       - name: Install dependencies (updates every 7 days)
         run: |
           TIMESTAMP_FILE=".github/.last_apt_update"
-          
-          # Check if tools exist
-          if command -v aria2c &> /dev/null && command -v 7z &> /dev/null && command -v jq &> /dev/null; then
+          if command -v aria2c &> /dev/null && command -v 7z &> /dev/null && command -v jq &> /dev/null && command -v yt-dlp &> /dev/null && command -v ffmpeg &> /dev/null; then
             TOOLS_EXIST=true
           else
             TOOLS_EXIST=false
           fi
-          
-          # Check if update needed
           SHOULD_UPDATE=false
           if [ -f "$TIMESTAMP_FILE" ]; then
             LAST_UPDATE=$(cat "$TIMESTAMP_FILE")
@@ -83,29 +96,24 @@ jobs:
           else
             SHOULD_UPDATE=true
           fi
-          
           if [ "$TOOLS_EXIST" = false ] || [ "$SHOULD_UPDATE" = true ]; then
             echo "Installing dependencies..."
             sudo apt-get update -qq
-            sudo apt-get install -y aria2 p7zip-full p7zip-rar curl jq python3
+            sudo apt-get install -y aria2 p7zip-full p7zip-rar curl jq python3 yt-dlp ffmpeg
             date +%s > "$TIMESTAMP_FILE"
           else
             echo "All tools present and up-to-date (updated $DAYS_OLD days ago). Skipping."
-          fi          
+          fi
+
       - name: Check existing downloads via manifest
         if: github.event.inputs.mode != 'Upload as Artifact'
         id: check_existing
         run: |
-          MODE="${{ github.event.inputs.mode }}"
           TORRENT_URL="${{ github.event.inputs.url }}"
-          if [ -n "${{ github.event.inputs.output_filename }}" ]; then
-            CLEAN_NAME=$(echo "${{ github.event.inputs.output_filename }}" | sed 's/[^a-zA-Z0-9._-]/_/g')
-          else
-            CLEAN_NAME="download"
-            if echo "$TORRENT_URL" | grep -q "dn="; then
-              CLEAN_NAME=$(echo "$TORRENT_URL" | grep -oP 'dn=[^&]*' | sed 's/dn=//' | python3 -c "import sys, urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))" 2>/dev/null)
-              CLEAN_NAME=$(echo "$CLEAN_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c1-100)
-            fi
+          CLEAN_NAME="download"
+          if echo "$TORRENT_URL" | grep -q "dn="; then
+            CLEAN_NAME=$(echo "$TORRENT_URL" | grep -oP 'dn=[^&]*' | sed 's/dn=//' | python3 -c "import sys, urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))" 2>/dev/null)
+            CLEAN_NAME=$(echo "$CLEAN_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c1-100)
           fi
           EXISTING_DIR=""
           EXISTING_TIMESTAMP=""
@@ -140,6 +148,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             .gitattributes
+            .github/
             history/
             ${{ steps.check_existing.outputs.existing_dir }}/
           sparse-checkout-cone-mode: false
@@ -208,38 +217,43 @@ jobs:
             echo "torrent_file=${TORRENT_FILE}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Show torrent info only
-        if: github.event.inputs.mode == 'Torrent - Show Info Only'
+      - name: Show info only
+        if: github.event.inputs.mode == 'Show Info Only'
         run: |
           TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
           mkdir -p "history/${TIMESTAMP}"
           {
-            echo "# Torrent Contents"
+            echo "# Download Info"
             echo ""
             echo "**Date:** ${TEHRAN_TIME} (Tehran)"
             echo ""
-            echo "**Files:**"
+            echo "**URL:**"
+            echo '```'
+            echo "${{ github.event.inputs.url }}"
+            echo '```'
             echo ""
             if [ -f ".temp/parsed_files.txt" ]; then
+              echo "**Files:**"
+              echo ""
               while IFS='|' read -r display_idx aria2_idx size path; do
                 SIZE_HUMAN=$(numfmt --to=iec "$size" 2>/dev/null || echo "$size bytes")
                 echo "- [${display_idx}] ${path} (${SIZE_HUMAN})"
               done < ".temp/parsed_files.txt"
             fi
-          } > "history/${TIMESTAMP}/torrent_info.md"
+          } > "history/${TIMESTAMP}/info.md"
           git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add history/
+          git config --local user.name "DownLord Bot"
+          git add .github/ history/
           if git diff --cached --quiet; then
             echo "Nothing to commit"
           else
-            git commit -m "Torrent info: ${TIMESTAMP}"
+            git commit -m "Info: ${TIMESTAMP}"
             git push
           fi
 
       - name: Determine files to download
-        if: contains(github.event.inputs.mode, 'Torrent') && github.event.inputs.mode != 'Torrent - Show Info Only' && (startsWith(github.event.inputs.url, 'magnet:') || endsWith(github.event.inputs.url, '.torrent'))
+        if: contains(github.event.inputs.mode, 'Torrent') && github.event.inputs.mode != 'Show Info Only' && (startsWith(github.event.inputs.url, 'magnet:') || endsWith(github.event.inputs.url, '.torrent'))
         id: file_selection
         run: |
           if [ -n "${{ github.event.inputs.select_files }}" ] && [ -f ".temp/parsed_files.txt" ]; then
@@ -254,7 +268,7 @@ jobs:
           fi
 
       - name: Download files
-        if: github.event.inputs.mode != 'Torrent - Show Info Only'
+        if: github.event.inputs.mode != 'Show Info Only'
         id: download
         run: |
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -267,10 +281,16 @@ jobs:
             IS_TORRENT=false
           fi
           
+          IS_VIDEO=false
+          if [ "$IS_TORRENT" = false ]; then
+            if yt-dlp --get-url "$TORRENT_URL" &>/dev/null; then
+              IS_VIDEO=true
+              echo "yt-dlp supported site detected"
+            fi
+          fi
+          
           CLEAN_NAME="download"
-          if [ -n "${{ github.event.inputs.output_filename }}" ]; then
-            CLEAN_NAME=$(echo "${{ github.event.inputs.output_filename }}" | sed 's/[^a-zA-Z0-9._-]/_/g')
-          elif [ "$IS_TORRENT" = true ] && echo "$TORRENT_URL" | grep -q "dn="; then
+          if [ "$IS_TORRENT" = true ] && echo "$TORRENT_URL" | grep -q "dn="; then
             CLEAN_NAME=$(echo "$TORRENT_URL" | grep -oP 'dn=[^&]*' | sed 's/dn=//' | python3 -c "import sys, urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))" 2>/dev/null)
             CLEAN_NAME=$(echo "$CLEAN_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c1-100)
           else
@@ -296,17 +316,69 @@ jobs:
               ARIA2_INPUT="${DOWNLOAD_DIR}/torrent.torrent"
             fi
             aria2c --seed-time=0 \
-                   --max-connection-per-server=${{ github.event.inputs.max_connections }} \
-                   --split=${{ github.event.inputs.max_connections }} \
+                   --max-connection-per-server=16 \
+                   --split=16 \
                    --dir="$DOWNLOAD_DIR" \
                    --continue=true \
                    --file-allocation=falloc \
                    ${{ steps.file_selection.outputs.select_option }} \
                    "$ARIA2_INPUT"
             rm -f "${DOWNLOAD_DIR}/torrent.torrent"
+          elif [ "$IS_VIDEO" = true ]; then
+            COOKIE_ARG=""
+            EXTRACTOR_ARG=""
+            if [ -n "${{ secrets.YOUTUBE_COOKIES }}" ]; then
+              echo "${{ secrets.YOUTUBE_COOKIES }}" > /tmp/cookies.txt
+              COOKIE_ARG="--cookies /tmp/cookies.txt"
+            else
+              EXTRACTOR_ARG='--extractor-args youtube:player_client=android,ios,web'
+            fi
+            
+            PLAYLIST_FLAG="--no-playlist"
+            if [ "${{ github.event.inputs.playlist }}" = "true" ]; then
+              PLAYLIST_FLAG="--yes-playlist"
+            fi
+            
+            QUALITY="${{ github.event.inputs.video_quality }}"
+            SUB_FLAG=""
+            
+            if [ "${{ github.event.inputs.subtitles }}" = "true" ]; then
+              SUB_FLAG="--write-subs --embed-subs --sub-lang en"
+              if [ "${{ github.event.inputs.auto_subs }}" = "true" ]; then
+                SUB_FLAG="$SUB_FLAG --write-auto-subs"
+              fi
+            fi
+            
+            case "$QUALITY" in
+              "Best quality")
+                FORMAT_ARG="-f bestvideo+bestaudio/best --merge-output-format mp4"
+                ;;
+              "1080p")
+                FORMAT_ARG="-f 'bestvideo[height<=1080]+bestaudio/best[height<=1080]' --merge-output-format mp4"
+                ;;
+              "720p")
+                FORMAT_ARG="-f 'bestvideo[height<=720]+bestaudio/best[height<=720]' --merge-output-format mp4"
+                ;;
+              "480p")
+                FORMAT_ARG="-f 'bestvideo[height<=480]+bestaudio/best[height<=480]' --merge-output-format mp4"
+                ;;
+              "Audio only")
+                FORMAT_ARG="-x --audio-format mp3"
+                ;;
+              "Subtitles only")
+                FORMAT_ARG="--skip-download --write-subs --sub-lang en"
+                if [ "${{ github.event.inputs.auto_subs }}" = "true" ]; then
+                  FORMAT_ARG="$FORMAT_ARG --write-auto-subs"
+                fi
+                ;;
+            esac
+            
+            yt-dlp $COOKIE_ARG $EXTRACTOR_ARG $FORMAT_ARG $SUB_FLAG $PLAYLIST_FLAG \
+                   -o "${DOWNLOAD_DIR}/%(title)s.%(ext)s" \
+                   "$TORRENT_URL"
           else
-            aria2c --max-connection-per-server=${{ github.event.inputs.max_connections }} \
-                   --split=${{ github.event.inputs.max_connections }} \
+            aria2c --max-connection-per-server=16 \
+                   --split=16 \
                    --dir="$DOWNLOAD_DIR" \
                    --out="${CLEAN_NAME}" \
                    --continue=true \
@@ -328,7 +400,7 @@ jobs:
           fi
 
       - name: Split large files
-        if: github.event.inputs.mode != 'Torrent - Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
+        if: github.event.inputs.mode != 'Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
         run: |
           DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
           SPLIT_SIZE=$((95 * 1048576))
@@ -358,7 +430,7 @@ jobs:
           retention-days: 90
 
       - name: Generate report
-        if: github.event.inputs.mode != 'Torrent - Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
+        if: github.event.inputs.mode != 'Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
         run: |
           DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
           TIMESTAMP="${{ steps.download.outputs.timestamp }}"
@@ -384,7 +456,7 @@ jobs:
           echo "}" >> "${REPORT_DIR}/manifest.json"
 
       - name: Update history
-        if: github.event.inputs.mode != 'Torrent - Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
+        if: github.event.inputs.mode != 'Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
         run: |
           export TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
           
@@ -396,7 +468,7 @@ jobs:
           repo = os.environ['REPO']
           branch = os.environ['BRANCH']
           download_dir = os.environ['DOWNLOAD_DIR']
-          torrent_url = os.environ['TORRENT_URL']
+          download_url = os.environ['TORRENT_URL']
           mode = os.environ['MODE']
           tehran_time = os.environ['TEHRAN_TIME']
           
@@ -477,7 +549,6 @@ jobs:
           entry_lines.append("---")
           entry_lines.append("")
           
-          # Storage stats
           total_bytes = 0
           entry_count = 0
           for item in os.listdir("history"):
@@ -519,7 +590,7 @@ jobs:
               else:
                   new_content = content + '\n' + entry
           else:
-              new_content = f"# 📥 Torrent Download History\n\nAll times in **Tehran timezone (IR)**.\n\n## 📥 Download History\n\n{entry}"
+              new_content = f"# 📥 DownLord History\n\nAll times in **Tehran timezone (IR)**.\n\n## 📥 Download History\n\n{entry}"
           
           with open(history_readme, 'w') as f:
               f.write(new_content)
@@ -537,10 +608,10 @@ jobs:
           python3 /tmp/update_history.py
 
       - name: Commit and push changes
-        if: github.event.inputs.mode != 'Torrent - Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
+        if: github.event.inputs.mode != 'Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
         run: |
           git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          git config --local user.name "DownLord Bot"
           rm -rf .temp
           git sparse-checkout add "${{ steps.download.outputs.download_dir }}"
           
