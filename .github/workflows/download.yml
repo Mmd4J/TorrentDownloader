@@ -30,6 +30,11 @@ on:
           - 'Audio only'
           - 'Subtitles only'
         default: 'Best quality'
+      fast_api:
+        description: '⚡ Use fast API for YouTube (bypasses restrictions)'
+        required: false
+        type: boolean
+        default: true
       subtitles:
         description: '📝 Embed English subtitles'
         required: false
@@ -104,6 +109,7 @@ jobs:
           else
             echo "All tools present and up-to-date (updated $DAYS_OLD days ago). Skipping."
           fi
+
       - name: Check existing downloads via manifest
         if: github.event.inputs.mode != 'Upload as Artifact'
         id: check_existing
@@ -280,9 +286,14 @@ jobs:
             IS_TORRENT=false
           fi
           
+          IS_YOUTUBE=false
           IS_VIDEO=false
           if [ "$IS_TORRENT" = false ]; then
-            if echo "$TORRENT_URL" | grep -qE "(youtube|youtu\.be|vimeo\.com|tiktok\.com|twitch\.tv|dailymotion\.com|bilibili\.com|soundcloud\.com|spotify\.com|bandcamp\.com|mixcloud\.com|audiomack\.com|deezer\.com|tidal\.com)"; then
+            if echo "$TORRENT_URL" | grep -qE "(youtube|youtu\.be)"; then
+              IS_YOUTUBE=true
+              IS_VIDEO=true
+              echo "YouTube detected"
+            elif echo "$TORRENT_URL" | grep -qE "(vimeo\.com|tiktok\.com|twitch\.tv|dailymotion\.com|bilibili\.com|soundcloud\.com|spotify\.com|bandcamp\.com|mixcloud\.com|audiomack\.com|deezer\.com|tidal\.com)"; then
               IS_VIDEO=true
               echo "Media site detected"
             fi
@@ -323,7 +334,47 @@ jobs:
                    ${{ steps.file_selection.outputs.select_option }} \
                    "$ARIA2_INPUT"
             rm -f "${DOWNLOAD_DIR}/torrent.torrent"
-          elif [ "$IS_VIDEO" = true ]; then
+          elif [ "$IS_YOUTUBE" = true ] && [ "${{ github.event.inputs.fast_api }}" = "true" ]; then
+            echo "Trying fast API for YouTube..."
+            QUALITY="${{ github.event.inputs.video_quality }}"
+            
+            # Map quality to API format
+            case "$QUALITY" in
+              "Audio only")
+                API_QUALITY="Audio (MP3 format)"
+                ;;
+              "480p")
+                API_QUALITY="480p (MP4 format)"
+                ;;
+              "720p")
+                API_QUALITY="720p (MP4 format)"
+                ;;
+              *)
+                API_QUALITY="720p (MP4 format)"
+                ;;
+            esac
+            
+            API_RESPONSE=$(curl -s -X POST "https://hub.ytconvert.org/api/download" \
+              -H "Content-Type: application/json" \
+              -d "{\"url\":\"$TORRENT_URL\",\"quality\":\"$API_QUALITY\"}")
+            
+            DL_LINK=$(echo "$API_RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('downloadUrl',''))" 2>/dev/null)
+            
+            if [ -n "$DL_LINK" ]; then
+              echo "Fast API success, downloading with aria2..."
+              aria2c --max-connection-per-server=16 \
+                     --split=16 \
+                     --dir="$DOWNLOAD_DIR" \
+                     --continue=true \
+                     --file-allocation=falloc \
+                     "$DL_LINK"
+            else
+              echo "Fast API failed, falling back to yt-dlp..."
+              IS_YOUTUBE=false
+            fi
+          fi
+          
+          if [ "$IS_VIDEO" = true ] && [ "$IS_YOUTUBE" = false ]; then
             COOKIE_ARG=""
             EXTRACTOR_ARG=""
             if [ -n "${{ secrets.YOUTUBE_COOKIES }}" ]; then
@@ -376,17 +427,8 @@ jobs:
                    --no-abort-on-error \
                    --restrict-filenames \
                    -o "${DOWNLOAD_DIR}/%(title)s.%(ext)s" \
-                   "$TORRENT_URL" || {
-              echo "yt-dlp failed, falling back to aria2..."
-              aria2c --max-connection-per-server=16 \
-                     --split=16 \
-                     --dir="$DOWNLOAD_DIR" \
-                     --out="${CLEAN_NAME}" \
-                     --continue=true \
-                     --file-allocation=falloc \
-                     "$TORRENT_URL"
-            }
-          else
+                   "$TORRENT_URL"
+          elif [ "$IS_TORRENT" = false ] && [ "$IS_VIDEO" = false ]; then
             aria2c --max-connection-per-server=16 \
                    --split=16 \
                    --dir="$DOWNLOAD_DIR" \
@@ -398,6 +440,39 @@ jobs:
           
           echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
           echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
+
+      - name: Zip entire folder
+        if: github.event.inputs.mode == 'Torrent - Zip Entire Folder'
+        run: |
+          cd "${{ steps.download.outputs.download_dir }}"
+          MAIN_FOLDER=$(find . -maxdepth 1 -type d ! -name '.' | head -n1)
+          if [ -n "$MAIN_FOLDER" ]; then
+            FOLDER_NAME=$(basename "$MAIN_FOLDER")
+            ls "${FOLDER_NAME}.zip".* >/dev/null 2>&1 || 7z a -tzip -mx0 -mmt=on "${FOLDER_NAME}.zip" "$MAIN_FOLDER" && rm -rf "$MAIN_FOLDER"
+          fi
+
+      - name: Split large files
+        if: github.event.inputs.mode != 'Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
+        run: |
+          DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
+          SPLIT_SIZE=$((95 * 1048576))
+          echo "Checking for files larger than 95MB..."
+          find "$DOWNLOAD_DIR" -type f ! -name "*.7z.*" -print0 | while IFS= read -r -d '' file; do
+            FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
+            BASENAME=$(basename "$file")
+            DIRNAME=$(dirname "$file")
+            EXISTING_PARTS=$(find "$DIRNAME" -maxdepth 1 -name "${BASENAME}.7z.*" 2>/dev/null | head -1)
+            if [ -n "$EXISTING_PARTS" ]; then
+              echo "Already split: $BASENAME"
+              continue
+            fi
+            if [ "$FILE_SIZE" -gt "$SPLIT_SIZE" ]; then
+              echo "Splitting: $BASENAME"
+              7z a -v95m -mx0 -mmt=on "${DIRNAME}/${BASENAME}.7z" "$file" && rm "$file"
+            fi
+          done
+          echo "Done."
+
       - name: Upload as artifact
         if: github.event.inputs.mode == 'Upload as Artifact'
         uses: actions/upload-artifact@v4
