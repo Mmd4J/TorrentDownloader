@@ -15,7 +15,7 @@ A GitHub Actions-powered universal downloader that grabs files from torrents, ma
 
 - **Torrent & Magnet Support** — Downloads via aria2 with multi-connection speed
 - **YouTube Fast API** — No cookies needed, bypasses restrictions
-- **Media Sites** — yt-dlp integration for TikTok, SoundCloud, Spotify, Vimeo, Twitch, Bandcamp, Mixcloud, Audiomack, Deezer, Tidal, Dailymotion, Bilibili and more
+- **Media Sites** — yt-dlp integration for TikTok, SoundCloud, Vimeo, Twitch, Bandcamp, Mixcloud, Deezer, Tidal, Dailymotion, Bilibili and more
 - **Direct URL Support** — Any download link works automatically
 - **Auto-Split Large Files** — Files over 95MB split into 95MB parts with 7zip
 - **Smart Dependency Install** — Only installs heavy tools (yt-dlp, ffmpeg) when needed
@@ -113,7 +113,7 @@ After the workflow completes, open `history/README.md` for your download history
    
    
    📊 Supported Sites (via yt-dlp)
-YouTube, TikTok, SoundCloud, Spotify, Bandcamp, Vimeo, Twitch, Dailymotion, Bilibili, Mixcloud, Audiomack, Deezer, Tidal — with cookies for best results.
+YouTube, TikTok, SoundCloud, Bandcamp, Vimeo, Twitch, Dailymotion, Bilibili, Mixcloud, Audiomack, Deezer, Tidal — with cookies for best results.
 
 # ⚠️ Limits
 
