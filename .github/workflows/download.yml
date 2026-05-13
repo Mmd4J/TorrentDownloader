@@ -110,6 +110,82 @@ jobs:
             echo "All tools present and up-to-date (updated $DAYS_OLD days ago). Skipping."
           fi
 
+      - name: Setup YouTube API script
+        run: |
+          cat > /tmp/yt_api.py << 'EOF'
+import os
+import sys
+import time
+import requests
+import re
+
+url = sys.argv[1]
+quality_input = sys.argv[2]
+outdir = sys.argv[3]
+
+API = 'https://hub.ytconvert.org/api/download'
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0',
+    'Accept': 'application/json',
+    'Referer': 'https://media.ytmp3.gg/',
+    'Origin': 'https://media.ytmp3.gg'
+}
+
+if "Audio" in quality_input:
+    payload = {'url': url, 'os': 'linux', 'output': {'type': 'audio', 'format': 'mp3'}, 'audio': {'bitrate': '320k'}}
+    ext = 'mp3'
+elif "1080" in quality_input:
+    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '1080p'}}
+    ext = 'mp4'
+elif "720" in quality_input:
+    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '720p'}}
+    ext = 'mp4'
+elif "480" in quality_input:
+    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '480p'}}
+    ext = 'mp4'
+else:
+    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '720p'}}
+    ext = 'mp4'
+
+try:
+    resp = requests.post(API, json=payload, headers=HEADERS, timeout=15)
+    if resp.status_code != 200:
+        print(f"API returned {resp.status_code}")
+        sys.exit(1)
+    
+    status_url = resp.json().get('statusUrl')
+    if not status_url:
+        print("No status URL in response")
+        sys.exit(1)
+    
+    for _ in range(60):
+        time.sleep(2)
+        s_resp = requests.get(status_url, headers=HEADERS, timeout=10)
+        if s_resp.status_code == 200:
+            data = s_resp.json()
+            if data.get('status') == 'completed':
+                dl_url = data.get('downloadUrl')
+                raw_title = data.get('title', 'YouTube_Video')
+                title = re.sub(r'[\\/*?:"<>| ]', '_', raw_title)
+                
+                if dl_url:
+                    filepath = os.path.join(outdir, f"{title}.{ext}")
+                    dl_req = requests.get(dl_url, stream=True, timeout=60)
+                    with open(filepath, "wb") as f:
+                        for chunk in dl_req.iter_content(8192):
+                            if chunk: f.write(chunk)
+                    print(f"DOWNLOADED:{filepath}")
+                    sys.exit(0)
+            elif data.get('status') in ('failed', 'error'):
+                print("API conversion failed")
+                sys.exit(1)
+    print("API timed out")
+    sys.exit(1)
+except Exception as e:
+    print(f"API error: {e}")
+    sys.exit(1)
+EOF
+
       - name: Check existing downloads via manifest
         if: github.event.inputs.mode != 'Upload as Artifact'
         id: check_existing
