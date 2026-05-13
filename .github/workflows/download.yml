@@ -279,7 +279,8 @@ jobs:
             done
             [ ${#ARIA2_INDEXES[@]} -gt 0 ] && echo "select_option=--select-file=$(IFS=','; echo "${ARIA2_INDEXES[*]}")" >> $GITHUB_OUTPUT
           fi
-                - name: Install media tools if needed
+
+      - name: Install media tools if needed
         run: |
           TORRENT_URL="${{ github.event.inputs.url }}"
           FAST_API="${{ github.event.inputs.fast_api }}"
@@ -591,7 +592,8 @@ jobs:
           
           echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
           echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
-                - name: Zip entire folder
+
+      - name: Zip entire folder
         if: github.event.inputs.mode == 'Torrent - Zip Entire Folder'
         run: |
           cd "${{ steps.download.outputs.download_dir }}"
