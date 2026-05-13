@@ -1,11 +1,766 @@
-name: Test Heredoc
-on: workflow_dispatch
+name: DownLord
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'URL, Magnet, or Torrent (Separate multiple with space, comma, or new line)'
+        required: true
+        type: string
+      mode:
+        description: 'Mode'
+        required: true
+        type: choice
+        options:
+          - 'Torrent - Flat Files'
+          - 'Torrent - Preserve Structure'
+          - 'Torrent - Zip Entire Folder'
+          - 'Show Info Only'
+          - 'Upload as Artifact'
+        default: 'Torrent - Flat Files'
+      video_quality:
+        description: '🎬 Video Quality (for yt-dlp supported sites)'
+        required: false
+        type: choice
+        options:
+          - 'Best quality'
+          - '1080p'
+          - '720p'
+          - '480p'
+          - 'Audio only'
+          - 'Subtitles only'
+        default: 'Best quality'
+      fast_api:
+        description: '⚡ Use fast API for YouTube (bypasses restrictions)'
+        required: false
+        type: boolean
+        default: true
+      subtitles:
+        description: '📝 Embed English subtitles'
+        required: false
+        type: boolean
+        default: true
+      auto_subs:
+        description: '🤖 Allow auto-generated subtitles'
+        required: false
+        type: boolean
+        default: false
+      playlist:
+        description: '📋 Download entire playlist (if URL is a playlist)'
+        required: false
+        type: boolean
+        default: false
+      select_files:
+        description: 'Torrent: Select file indexes (e.g., "1,3,5" or empty for all)'
+        required: false
+        type: string
+        default: ''
+      file_pattern:
+        description: 'Torrent: File pattern (e.g., "*.mkv", "*.mp4" or empty for all)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+  actions: write
+
 jobs:
-  test:
+  download:
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          cat > /tmp/test.py << 'EOF'
-print("hello world")
-EOF
-          python3 /tmp/test.py
+      - name: Checkout history only
+        if: github.event.inputs.mode != 'Upload as Artifact'
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
+          sparse-checkout: |
+            .gitattributes
+            .github/
+            history/
+          sparse-checkout-cone-mode: false
+
+      - name: Install dependencies (updates every 7 days)
+        run: |
+          TIMESTAMP_FILE=".github/.last_apt_update"
+          if command -v aria2c &> /dev/null && command -v 7z &> /dev/null && command -v jq &> /dev/null && command -v yt-dlp &> /dev/null && command -v ffprobe &> /dev/null; then
+            TOOLS_EXIST=true
+          else
+            TOOLS_EXIST=false
+          fi
+          SHOULD_UPDATE=false
+          if [ -f "$TIMESTAMP_FILE" ]; then
+            LAST_UPDATE=$(cat "$TIMESTAMP_FILE")
+            NOW=$(date +%s)
+            DAYS_OLD=$(( (NOW - LAST_UPDATE) / 86400 ))
+            if [ $DAYS_OLD -gt 7 ]; then
+              echo "Tools last updated $DAYS_OLD days ago, refreshing..."
+              SHOULD_UPDATE=true
+            fi
+          else
+            SHOULD_UPDATE=true
+          fi
+          if [ "$TOOLS_EXIST" = false ] || [ "$SHOULD_UPDATE" = true ]; then
+            echo "Installing dependencies..."
+            sudo apt-get update -qq
+            sudo apt-get install -y aria2 p7zip-full p7zip-rar curl jq python3 python3-requests yt-dlp ffmpeg
+            date +%s > "$TIMESTAMP_FILE"
+          else
+            echo "All tools present and up-to-date (updated $DAYS_OLD days ago). Skipping."
+          fi
+
+      - name: Setup YouTube API script
+        run: |
+          echo 'import os' > /tmp/yt_api.py
+          echo 'import sys' >> /tmp/yt_api.py
+          echo 'import time' >> /tmp/yt_api.py
+          echo 'import requests' >> /tmp/yt_api.py
+          echo 'import re' >> /tmp/yt_api.py
+          echo '' >> /tmp/yt_api.py
+          echo 'url = sys.argv[1]' >> /tmp/yt_api.py
+          echo 'quality_input = sys.argv[2]' >> /tmp/yt_api.py
+          echo 'outdir = sys.argv[3]' >> /tmp/yt_api.py
+          echo '' >> /tmp/yt_api.py
+          echo "API = 'https://hub.ytconvert.org/api/download'" >> /tmp/yt_api.py
+          echo 'HEADERS = {' >> /tmp/yt_api.py
+          echo "    'User-Agent': 'Mozilla/5.0'," >> /tmp/yt_api.py
+          echo "    'Accept': 'application/json'," >> /tmp/yt_api.py
+          echo "    'Referer': 'https://media.ytmp3.gg/'," >> /tmp/yt_api.py
+          echo "    'Origin': 'https://media.ytmp3.gg'" >> /tmp/yt_api.py
+          echo '}' >> /tmp/yt_api.py
+          echo '' >> /tmp/yt_api.py
+          echo 'if "Audio" in quality_input:' >> /tmp/yt_api.py
+          echo "    payload = {'url': url, 'os': 'linux', 'output': {'type': 'audio', 'format': 'mp3'}, 'audio': {'bitrate': '320k'}}" >> /tmp/yt_api.py
+          echo "    ext = 'mp3'" >> /tmp/yt_api.py
+          echo 'elif "1080" in quality_input:' >> /tmp/yt_api.py
+          echo "    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '1080p'}}" >> /tmp/yt_api.py
+          echo "    ext = 'mp4'" >> /tmp/yt_api.py
+          echo 'elif "720" in quality_input:' >> /tmp/yt_api.py
+          echo "    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '720p'}}" >> /tmp/yt_api.py
+          echo "    ext = 'mp4'" >> /tmp/yt_api.py
+          echo 'elif "480" in quality_input:' >> /tmp/yt_api.py
+          echo "    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '480p'}}" >> /tmp/yt_api.py
+          echo "    ext = 'mp4'" >> /tmp/yt_api.py
+          echo 'else:' >> /tmp/yt_api.py
+          echo "    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '720p'}}" >> /tmp/yt_api.py
+          echo "    ext = 'mp4'" >> /tmp/yt_api.py
+          echo '' >> /tmp/yt_api.py
+          echo 'try:' >> /tmp/yt_api.py
+          echo '    resp = requests.post(API, json=payload, headers=HEADERS, timeout=15)' >> /tmp/yt_api.py
+          echo '    if resp.status_code != 200:' >> /tmp/yt_api.py
+          echo '        print(f"API returned {resp.status_code}")' >> /tmp/yt_api.py
+          echo '        sys.exit(1)' >> /tmp/yt_api.py
+          echo '    status_url = resp.json().get("statusUrl")' >> /tmp/yt_api.py
+          echo '    if not status_url:' >> /tmp/yt_api.py
+          echo '        print("No status URL")' >> /tmp/yt_api.py
+          echo '        sys.exit(1)' >> /tmp/yt_api.py
+          echo '    for _ in range(60):' >> /tmp/yt_api.py
+          echo '        time.sleep(2)' >> /tmp/yt_api.py
+          echo '        s_resp = requests.get(status_url, headers=HEADERS, timeout=10)' >> /tmp/yt_api.py
+          echo '        if s_resp.status_code == 200:' >> /tmp/yt_api.py
+          echo '            data = s_resp.json()' >> /tmp/yt_api.py
+          echo '            if data.get("status") == "completed":' >> /tmp/yt_api.py
+          echo '                dl_url = data.get("downloadUrl")' >> /tmp/yt_api.py
+          echo '                raw_title = data.get("title", "YouTube_Video")' >> /tmp/yt_api.py
+          echo '                title = re.sub(r'"'"'[\\\\/*?:"<>| ]'"'"', '"'"'_'"'"', raw_title)' >> /tmp/yt_api.py
+          echo '                if dl_url:' >> /tmp/yt_api.py
+          echo '                    filepath = os.path.join(outdir, f"{title}.{ext}")' >> /tmp/yt_api.py
+          echo '                    dl_req = requests.get(dl_url, stream=True, timeout=60)' >> /tmp/yt_api.py
+          echo '                    with open(filepath, "wb") as f:' >> /tmp/yt_api.py
+          echo '                        for chunk in dl_req.iter_content(8192):' >> /tmp/yt_api.py
+          echo '                            if chunk: f.write(chunk)' >> /tmp/yt_api.py
+          echo '                    print(f"DOWNLOADED:{filepath}")' >> /tmp/yt_api.py
+          echo '                    sys.exit(0)' >> /tmp/yt_api.py
+          echo '            elif data.get("status") in ("failed", "error"):' >> /tmp/yt_api.py
+          echo '                print("API conversion failed")' >> /tmp/yt_api.py
+          echo '                sys.exit(1)' >> /tmp/yt_api.py
+          echo '    print("API timed out")' >> /tmp/yt_api.py
+          echo '    sys.exit(1)' >> /tmp/yt_api.py
+          echo 'except Exception as e:' >> /tmp/yt_api.py
+          echo '    print(f"API error: {e}")' >> /tmp/yt_api.py
+          echo '    sys.exit(1)' >> /tmp/yt_api.py
+      - name: Check existing downloads via manifest
+        if: github.event.inputs.mode != 'Upload as Artifact'
+        id: check_existing
+        run: |
+          TORRENT_URL="${{ github.event.inputs.url }}"
+          CLEAN_NAME="download"
+          if echo "$TORRENT_URL" | grep -q "dn="; then
+            CLEAN_NAME=$(echo "$TORRENT_URL" | grep -oP 'dn=[^&]*' | sed 's/dn=//' | python3 -c "import sys, urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))" 2>/dev/null)
+            CLEAN_NAME=$(echo "$CLEAN_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c1-100)
+          fi
+          EXISTING_DIR=""
+          EXISTING_TIMESTAMP=""
+          if [ -d "history" ]; then
+            for MANIFEST in history/*/manifest.json; do
+              if [ -f "$MANIFEST" ]; then
+                MANIFEST_DIR=$(jq -r '.download_dir' "$MANIFEST" 2>/dev/null)
+                MANIFEST_URL=$(jq -r '.url' "$MANIFEST" 2>/dev/null)
+                if [ "$MANIFEST_URL" = "$TORRENT_URL" ] || echo "$MANIFEST_DIR" | grep -q "_${CLEAN_NAME}$"; then
+                  EXISTING_DIR="$MANIFEST_DIR"
+                  EXISTING_TIMESTAMP=$(jq -r '.timestamp' "$MANIFEST" 2>/dev/null)
+                  echo "Found existing: $EXISTING_DIR"
+                  break
+                fi
+              fi
+            done
+          fi
+          if [ -n "$EXISTING_DIR" ]; then
+            echo "existing_dir=${EXISTING_DIR}" >> $GITHUB_OUTPUT
+            echo "existing_timestamp=${EXISTING_TIMESTAMP}" >> $GITHUB_OUTPUT
+            echo "status=resuming" >> $GITHUB_OUTPUT
+          else
+            echo "status=new" >> $GITHUB_OUTPUT
+          fi
+          echo "clean_name=${CLEAN_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Full checkout if resuming
+        if: steps.check_existing.outputs.status == 'resuming' && github.event.inputs.mode != 'Upload as Artifact'
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
+          sparse-checkout: |
+            .gitattributes
+            .github/
+            history/
+            ${{ steps.check_existing.outputs.existing_dir }}/
+          sparse-checkout-cone-mode: false
+
+      - name: Configure git for binaries
+        if: github.event.inputs.mode != 'Upload as Artifact'
+        run: |
+          cat >> .gitattributes << 'EOF'
+          *.7z.* -delta
+          *.zip -delta
+          *.mp4 -delta
+          *.mkv -delta
+          *.mp3 -delta
+          *.jpg -delta
+          *.png -delta
+          *.pdf -delta
+          *.exe -delta
+          *.apk -delta
+          EOF
+          git config core.compression 0
+          git config pack.compression 0
+
+      - name: Cache torrent metadata
+        if: contains(github.event.inputs.mode, 'Torrent') && (startsWith(github.event.inputs.url, 'magnet:') || endsWith(github.event.inputs.url, '.torrent'))
+        id: torrent_cache
+        uses: actions/cache@v4
+        with:
+          path: .temp/torrent_cache
+          key: torrent-meta-${{ github.event.inputs.url }}
+
+      - name: Get torrent info
+        if: contains(github.event.inputs.mode, 'Torrent') && (startsWith(github.event.inputs.url, 'magnet:') || endsWith(github.event.inputs.url, '.torrent'))
+        id: torrent_info
+        run: |
+          mkdir -p .temp downloads history
+          TORRENT_INPUT="${{ github.event.inputs.url }}"
+          if [ -f ".temp/torrent_cache/parsed_files.txt" ]; then
+            cp .temp/torrent_cache/* .temp/ 2>/dev/null
+            TORRENT_FILE=".temp/torrent.torrent"
+          else
+            if [[ "$TORRENT_INPUT" != magnet:* ]]; then
+              aria2c --dir=".temp" --out="torrent.torrent" "$TORRENT_INPUT"
+            else
+              aria2c --show-files=true --dir=".temp" --bt-save-metadata=true --bt-metadata-only=true "$TORRENT_INPUT" 2>&1
+            fi
+            TORRENT_FILE=$(find ".temp" -name "*.torrent" 2>/dev/null | head -n1)
+            if [ -f "$TORRENT_FILE" ]; then
+              aria2c --show-files=true "$TORRENT_FILE" 2>&1 | grep -E '^[[:space:]]*[0-9]+\|' > ".temp/file_list.txt"
+              INDEX=1
+              > ".temp/parsed_files.txt"
+              while IFS='|' read -r idx size path; do
+                idx=$(echo "$idx" | xargs); size=$(echo "$size" | xargs); path=$(echo "$path" | xargs)
+                [ -z "$path" ] && continue
+                echo "${INDEX}|${idx}|${size}|${path}" >> ".temp/parsed_files.txt"
+                INDEX=$((INDEX + 1))
+              done < ".temp/file_list.txt"
+              mkdir -p .temp/torrent_cache
+              cp .temp/parsed_files.txt .temp/torrent.torrent .temp/torrent_cache/
+            fi
+          fi
+          if [ -f "$TORRENT_FILE" ]; then
+            while IFS='|' read -r index idx size path; do
+              SIZE_HUMAN=$(numfmt --to=iec "$size" 2>/dev/null || echo "$size bytes")
+              echo "[${index}] ${path} (${SIZE_HUMAN})"
+            done < ".temp/parsed_files.txt"
+            echo "torrent_file=${TORRENT_FILE}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Show info only
+        if: github.event.inputs.mode == 'Show Info Only'
+        run: |
+          TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          mkdir -p "history/${TIMESTAMP}"
+          {
+            echo "# Download Info"
+            echo ""
+            echo "**Date:** ${TEHRAN_TIME} (Tehran)"
+            echo ""
+            echo "**URL:**"
+            echo '```'
+            echo "${{ github.event.inputs.url }}"
+            echo '```'
+            echo ""
+            if [ -f ".temp/parsed_files.txt" ]; then
+              echo "**Files:**"
+              echo ""
+              while IFS='|' read -r display_idx aria2_idx size path; do
+                SIZE_HUMAN=$(numfmt --to=iec "$size" 2>/dev/null || echo "$size bytes")
+                echo "- [${display_idx}] ${path} (${SIZE_HUMAN})"
+              done < ".temp/parsed_files.txt"
+            fi
+          } > "history/${TIMESTAMP}/info.md"
+          git config --local user.email "action@github.com"
+          git config --local user.name "DownLord Bot"
+          git add .github/ history/
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+          else
+            git commit -m "Info: ${TIMESTAMP}"
+            git push
+          fi
+
+      - name: Determine files to download
+        if: contains(github.event.inputs.mode, 'Torrent') && github.event.inputs.mode != 'Show Info Only' && (startsWith(github.event.inputs.url, 'magnet:') || endsWith(github.event.inputs.url, '.torrent'))
+        id: file_selection
+        run: |
+          if [ -n "${{ github.event.inputs.select_files }}" ] && [ -f ".temp/parsed_files.txt" ]; then
+            IFS=',' read -ra INDEXES <<< "${{ github.event.inputs.select_files }}"
+            ARIA2_INDEXES=()
+            for i in "${INDEXES[@]}"; do
+              i=$(echo "$i" | xargs)
+              ARIA2_IDX=$(grep "^${i}|" ".temp/parsed_files.txt" | cut -d'|' -f2)
+              [ -n "$ARIA2_IDX" ] && ARIA2_INDEXES+=("$ARIA2_IDX")
+            done
+            [ ${#ARIA2_INDEXES[@]} -gt 0 ] && echo "select_option=--select-file=$(IFS=','; echo "${ARIA2_INDEXES[*]}")" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download files
+        if: github.event.inputs.mode != 'Show Info Only'
+        id: download
+        run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          MODE="${{ github.event.inputs.mode }}"
+          TORRENT_URL="${{ github.event.inputs.url }}"
+          
+          if [[ "$TORRENT_URL" == magnet:* ]] || echo "$TORRENT_URL" | grep -qE '\.torrent(\?.*)?$'; then
+            IS_TORRENT=true
+          else
+            IS_TORRENT=false
+          fi
+          
+          IS_YOUTUBE=false
+          IS_VIDEO=false
+          if [ "$IS_TORRENT" = false ]; then
+            if echo "$TORRENT_URL" | grep -qE "(youtube|youtu\.be)"; then
+              IS_YOUTUBE=true
+              IS_VIDEO=true
+              echo "YouTube detected"
+            elif echo "$TORRENT_URL" | grep -qE "(vimeo\.com|tiktok\.com|twitch\.tv|dailymotion\.com|bilibili\.com|soundcloud\.com|spotify\.com|bandcamp\.com|mixcloud\.com|audiomack\.com|deezer\.com|tidal\.com)"; then
+              IS_VIDEO=true
+              echo "Media site detected"
+            fi
+          fi
+          
+          CLEAN_NAME="download"
+          if [ "$IS_TORRENT" = true ] && echo "$TORRENT_URL" | grep -q "dn="; then
+            CLEAN_NAME=$(echo "$TORRENT_URL" | grep -oP 'dn=[^&]*' | sed 's/dn=//' | python3 -c "import sys, urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))" 2>/dev/null)
+            CLEAN_NAME=$(echo "$CLEAN_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c1-100)
+          else
+            URL_PATH=$(echo "$TORRENT_URL" | sed 's/\?.*//')
+            CLEAN_NAME=$(basename "$URL_PATH" | sed 's/[^a-zA-Z0-9._-]/_/g' | cut -c1-100)
+            [ -z "$CLEAN_NAME" ] && CLEAN_NAME="download"
+          fi
+          
+          if [ "$MODE" != "Upload as Artifact" ] && [ "${{ steps.check_existing.outputs.status }}" = "resuming" ]; then
+            DOWNLOAD_DIR="${{ steps.check_existing.outputs.existing_dir }}"
+            TIMESTAMP="${{ steps.check_existing.outputs.existing_timestamp }}"
+            mkdir -p "$DOWNLOAD_DIR"
+          else
+            DOWNLOAD_DIR="downloads/${TIMESTAMP}_${CLEAN_NAME}"
+            mkdir -p "$DOWNLOAD_DIR"
+          fi
+          
+          if [ "$IS_TORRENT" = true ]; then
+            if [[ "$TORRENT_URL" == magnet:* ]]; then
+              ARIA2_INPUT="$TORRENT_URL"
+            else
+              aria2c --dir="${DOWNLOAD_DIR}" --out="torrent.torrent" "$TORRENT_URL"
+              ARIA2_INPUT="${DOWNLOAD_DIR}/torrent.torrent"
+            fi
+            aria2c --seed-time=0 \
+                   --max-connection-per-server=16 \
+                   --split=16 \
+                   --dir="$DOWNLOAD_DIR" \
+                   --continue=true \
+                   --file-allocation=falloc \
+                   ${{ steps.file_selection.outputs.select_option }} \
+                   "$ARIA2_INPUT"
+            rm -f "${DOWNLOAD_DIR}/torrent.torrent"
+            
+          elif [ "$IS_YOUTUBE" = true ] && [ "${{ github.event.inputs.fast_api }}" = "true" ]; then
+            echo "Trying fast API for YouTube..."
+            QUALITY="${{ github.event.inputs.video_quality }}"
+            
+            API_OUTPUT=$(python3 /tmp/yt_api.py "$TORRENT_URL" "$QUALITY" "$DOWNLOAD_DIR" 2>&1)
+            echo "$API_OUTPUT"
+            
+            if echo "$API_OUTPUT" | grep -q "DOWNLOADED:"; then
+              echo "Fast API success!"
+            else
+              echo "Fast API failed, falling back to yt-dlp..."
+              IS_YOUTUBE=false
+            fi
+          fi
+          
+          if [ "$IS_VIDEO" = true ] && [ "$IS_YOUTUBE" = false ]; then
+            COOKIE_ARG=""
+            EXTRACTOR_ARG=""
+            if [ -n "${{ secrets.YOUTUBE_COOKIES }}" ]; then
+              echo "${{ secrets.YOUTUBE_COOKIES }}" > /tmp/cookies.txt
+              COOKIE_ARG="--cookies /tmp/cookies.txt"
+            else
+              EXTRACTOR_ARG='--extractor-args youtube:player_client=android,ios,web'
+            fi
+            
+            PLAYLIST_FLAG="--no-playlist"
+            if [ "${{ github.event.inputs.playlist }}" = "true" ]; then
+              PLAYLIST_FLAG="--yes-playlist"
+            fi
+            
+            QUALITY="${{ github.event.inputs.video_quality }}"
+            SUB_FLAG=""
+            
+            if [ "${{ github.event.inputs.subtitles }}" = "true" ]; then
+              SUB_FLAG="--write-subs --embed-subs --sub-lang en"
+              if [ "${{ github.event.inputs.auto_subs }}" = "true" ]; then
+                SUB_FLAG="$SUB_FLAG --write-auto-subs"
+              fi
+            fi
+            
+            case "$QUALITY" in
+              "Best quality")
+                FORMAT_ARG="-f bestvideo+bestaudio/best --merge-output-format mp4"
+                ;;
+              "1080p")
+                FORMAT_ARG="-f 'bestvideo[height<=1080]+bestaudio/best[height<=1080]' --merge-output-format mp4"
+                ;;
+              "720p")
+                FORMAT_ARG="-f 'bestvideo[height<=720]+bestaudio/best[height<=720]' --merge-output-format mp4"
+                ;;
+              "480p")
+                FORMAT_ARG="-f 'bestvideo[height<=480]+bestaudio/best[height<=480]' --merge-output-format mp4"
+                ;;
+              "Audio only")
+                FORMAT_ARG="-x --audio-format mp3"
+                ;;
+              "Subtitles only")
+                FORMAT_ARG="--skip-download --write-subs --sub-lang en"
+                if [ "${{ github.event.inputs.auto_subs }}" = "true" ]; then
+                  FORMAT_ARG="$FORMAT_ARG --write-auto-subs"
+                fi
+                ;;
+            esac
+            
+            yt-dlp $COOKIE_ARG $EXTRACTOR_ARG $FORMAT_ARG $SUB_FLAG $PLAYLIST_FLAG \
+                   --no-abort-on-error \
+                   --restrict-filenames \
+                   -o "${DOWNLOAD_DIR}/%(title)s.%(ext)s" \
+                   "$TORRENT_URL"
+                   
+          elif [ "$IS_TORRENT" = false ] && [ "$IS_VIDEO" = false ]; then
+            aria2c --max-connection-per-server=16 \
+                   --split=16 \
+                   --dir="$DOWNLOAD_DIR" \
+                   --out="${CLEAN_NAME}" \
+                   --continue=true \
+                   --file-allocation=falloc \
+                   "$TORRENT_URL"
+          fi
+          
+          echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
+          echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
+
+      - name: Zip entire folder
+        if: github.event.inputs.mode == 'Torrent - Zip Entire Folder'
+        run: |
+          cd "${{ steps.download.outputs.download_dir }}"
+          MAIN_FOLDER=$(find . -maxdepth 1 -type d ! -name '.' | head -n1)
+          if [ -n "$MAIN_FOLDER" ]; then
+            FOLDER_NAME=$(basename "$MAIN_FOLDER")
+            ls "${FOLDER_NAME}.zip".* >/dev/null 2>&1 || 7z a -tzip -mx0 -mmt=on "${FOLDER_NAME}.zip" "$MAIN_FOLDER" && rm -rf "$MAIN_FOLDER"
+          fi
+
+      - name: Split large files
+        if: github.event.inputs.mode != 'Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
+        run: |
+          DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
+          SPLIT_SIZE=$((95 * 1048576))
+          echo "Checking for files larger than 95MB..."
+          find "$DOWNLOAD_DIR" -type f ! -name "*.7z.*" -print0 | while IFS= read -r -d '' file; do
+            FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
+            BASENAME=$(basename "$file")
+            DIRNAME=$(dirname "$file")
+            EXISTING_PARTS=$(find "$DIRNAME" -maxdepth 1 -name "${BASENAME}.7z.*" 2>/dev/null | head -1)
+            if [ -n "$EXISTING_PARTS" ]; then
+              echo "Already split: $BASENAME"
+              continue
+            fi
+            if [ "$FILE_SIZE" -gt "$SPLIT_SIZE" ]; then
+              echo "Splitting: $BASENAME"
+              7z a -v95m -mx0 -mmt=on "${DIRNAME}/${BASENAME}.7z" "$file" && rm "$file"
+            fi
+          done
+          echo "Done."
+
+      - name: Upload as artifact
+        if: github.event.inputs.mode == 'Upload as Artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: download-${{ steps.download.outputs.timestamp }}
+          path: ${{ steps.download.outputs.download_dir }}
+          retention-days: 90
+
+      - name: Generate report
+        if: github.event.inputs.mode != 'Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
+        run: |
+          DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
+          TIMESTAMP="${{ steps.download.outputs.timestamp }}"
+          REPORT_DIR="history/${TIMESTAMP}"
+          mkdir -p "$REPORT_DIR"
+          echo "{" > "${REPORT_DIR}/manifest.json"
+          echo "  \"timestamp\": \"${TIMESTAMP}\"," >> "${REPORT_DIR}/manifest.json"
+          echo "  \"url\": \"${{ github.event.inputs.url }}\"," >> "${REPORT_DIR}/manifest.json"
+          echo "  \"mode\": \"${{ github.event.inputs.mode }}\"," >> "${REPORT_DIR}/manifest.json"
+          echo "  \"download_dir\": \"${DOWNLOAD_DIR}\"," >> "${REPORT_DIR}/manifest.json"
+          echo "  \"files\": [" >> "${REPORT_DIR}/manifest.json"
+          FIRST=true
+          find "$DOWNLOAD_DIR" -type f ! -name "*.torrent" -print0 | sort -z | while IFS= read -r -d '' file; do
+            REL_PATH="${file#$DOWNLOAD_DIR/}"
+            FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
+            FILE_HASH=$(sha256sum "$file" | cut -d' ' -f1)
+            SIZE_HUMAN=$(numfmt --to=iec $FILE_SIZE 2>/dev/null || echo "${FILE_SIZE} bytes")
+            [ "$FIRST" = false ] && echo "," >> "${REPORT_DIR}/manifest.json"
+            FIRST=false
+            echo "    {\"path\": \"${REL_PATH}\", \"size\": ${FILE_SIZE}, \"size_human\": \"${SIZE_HUMAN}\", \"sha256\": \"${FILE_HASH}\"}" >> "${REPORT_DIR}/manifest.json"
+          done
+          echo "  ]" >> "${REPORT_DIR}/manifest.json"
+          echo "}" >> "${REPORT_DIR}/manifest.json"
+
+      - name: Update history
+        if: github.event.inputs.mode != 'Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
+        run: |
+          export TEHRAN_TIME=$(TZ='Asia/Tehran' date +'%Y-%m-%d %H:%M')
+          
+          cat > /tmp/update_history.py << 'SCRIPTEND'
+          import json, urllib.parse, os, re
+          from collections import defaultdict
+          
+          timestamp = os.environ['TIMESTAMP']
+          repo = os.environ['REPO']
+          branch = os.environ['BRANCH']
+          download_dir = os.environ['DOWNLOAD_DIR']
+          download_url = os.environ['TORRENT_URL']
+          mode = os.environ['MODE']
+          tehran_time = os.environ['TEHRAN_TIME']
+          
+          manifest_file = f"history/{timestamp}/manifest.json"
+          history_readme = "history/README.md"
+          links_file = f"history/{timestamp}/links.txt"
+          
+          with open(manifest_file) as f:
+              manifest = json.load(f)
+          
+          normal_files = []
+          split_groups = defaultdict(list)
+          
+          for file_info in manifest['files']:
+              p = file_info['path']
+              mt = re.match(r'(.+)\.7z\.(\d{3})$', p)
+              if mt:
+                  split_groups[mt.group(1)].append(file_info)
+              else:
+                  normal_files.append(file_info)
+          
+          icons = {
+              'zip': '🗜️', 'mkv': '🎬', 'mp4': '🎬', 'mov': '🎬', 'webm': '🎬',
+              'mp3': '🎵', 'flac': '🎵', 'ogg': '🎵', 'm4a': '🎵',
+              'jpg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'webp': '🖼️',
+              'pdf': '📕', 'epub': '📗',
+              'txt': '📄', 'srt': '💬',
+          }
+          
+          def get_icon(path):
+              ext = path.lower().split('.')[-1] if '.' in path else ''
+              return icons.get(ext, '📄')
+          
+          def make_link(path):
+              encoded = urllib.parse.quote(path, safe='')
+              return f"https://github.com/{repo}/raw/refs/heads/{branch}/{download_dir}/{encoded}"
+          
+          all_links = []
+          entry_lines = []
+          
+          entry_lines.append(f"### 📅 {tehran_time} (Tehran)")
+          entry_lines.append("")
+          entry_lines.append(f"**Mode:** {mode}")
+          entry_lines.append("")
+          entry_lines.append("**Files:**")
+          entry_lines.append("")
+          
+          for file_info in normal_files:
+              l = make_link(file_info['path'])
+              all_links.append(l)
+              entry_lines.append(f"- {get_icon(file_info['path'])} [**{file_info['path']}**]({l}) - {file_info['size_human']}")
+          
+          for b, p in sorted(split_groups.items()):
+              p.sort(key=lambda x: x['path'])
+              ts = sum(x['size'] for x in p)
+              if ts >= 1073741824:
+                  th = f'{ts/1073741824:.2f}GB'
+              elif ts >= 1048576:
+                  th = f'{ts/1048576:.1f}MB'
+              else:
+                  th = f'{ts//1024}KB'
+              
+              entry_lines.append("")
+              entry_lines.append(f"- 📦 **{b}.7z** (Split Archive - {th} total)")
+              
+              for i, pt in enumerate(p):
+                  l = make_link(pt['path'])
+                  all_links.append(l)
+                  px = "  └─" if i == len(p) - 1 else "  ├─"
+                  entry_lines.append(f"{px} 📎 [**{pt['path']}**]({l}) - {pt['size_human']}")
+              
+              entry_lines.append(f"  💡 *Download all parts, then: `7z x {p[0]['path']}`*")
+          
+          entry_lines.append("")
+          links_raw_url = f"https://github.com/{repo}/raw/refs/heads/{branch}/history/{timestamp}/links.txt"
+          entry_lines.append(f"[📋 Download All Links]({links_raw_url})")
+          entry_lines.append("")
+          entry_lines.append("---")
+          entry_lines.append("")
+          
+          total_bytes = 0
+          entry_count = 0
+          for item in os.listdir("history"):
+              mf_path = os.path.join("history", item, "manifest.json")
+              if os.path.isfile(mf_path):
+                  entry_count += 1
+                  try:
+                      with open(mf_path) as mf:
+                          data = json.load(mf)
+                          total_bytes += sum(f['size'] for f in data.get('files', []))
+                  except:
+                      pass
+          
+          if total_bytes >= 1073741824:
+              size_str = f"{total_bytes/1073741824:.1f}GB"
+          elif total_bytes >= 1048576:
+              size_str = f"{total_bytes/1048576:.0f}MB"
+          elif total_bytes >= 1024:
+              size_str = f"{total_bytes//1024}KB"
+          else:
+              size_str = f"{total_bytes}B"
+          
+          storage_line = f"> 💾 {size_str} | {entry_count} downloads"
+          entry_lines.insert(0, storage_line)
+          entry_lines.insert(1, "")
+          
+          entry = "\n".join(entry_lines)
+          
+          with open(links_file, 'w') as f:
+              f.write("\n".join(all_links) + "\n")
+          
+          if os.path.exists(history_readme):
+              with open(history_readme) as f:
+                  content = f.read()
+              mk = '## 📥 Download History'
+              if mk in content:
+                  parts = content.split(mk, 1)
+                  new_content = parts[0] + mk + '\n\n' + entry + parts[1]
+              else:
+                  new_content = content + '\n' + entry
+          else:
+              new_content = f"# 📥 DownLord History\n\nAll times in **Tehran timezone (IR)**.\n\n## 📥 Download History\n\n{entry}"
+          
+          with open(history_readme, 'w') as f:
+              f.write(new_content)
+          
+          print("History updated!")
+          SCRIPTEND
+          
+          export TIMESTAMP="${{ steps.download.outputs.timestamp }}"
+          export REPO="${{ github.repository }}"
+          export BRANCH="${{ github.ref_name }}"
+          export DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
+          export TORRENT_URL="${{ github.event.inputs.url }}"
+          export MODE="${{ github.event.inputs.mode }}"
+          
+          python3 /tmp/update_history.py
+
+      - name: Commit and push changes
+        if: github.event.inputs.mode != 'Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "DownLord Bot"
+          rm -rf .temp
+          git sparse-checkout add "${{ steps.download.outputs.download_dir }}"
+          
+          git add .github/ history/
+          if git diff --cached --quiet; then
+            echo "No history changes"
+          else
+            git commit -m "Update history: ${{ steps.download.outputs.timestamp }}"
+          fi
+          
+          DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
+          BATCH_SIZE_MB=1000
+          echo "Preparing batched commits (${BATCH_SIZE_MB}MB per batch)..."
+          NEW_FILES=$(git ls-files --others --exclude-standard "$DOWNLOAD_DIR" 2>/dev/null)
+          MODIFIED_FILES=$(git diff --name-only "$DOWNLOAD_DIR" 2>/dev/null)
+          ALL_FILES=$(echo -e "$NEW_FILES\n$MODIFIED_FILES" | sort -u | grep -v '^$')
+          if [ -z "$ALL_FILES" ]; then
+            echo "No new files to commit"
+          else
+            CURRENT_BATCH_SIZE=0; BATCH_NUM=1; > /dev/shm/batch_files.txt
+            while IFS= read -r file; do
+              [ -z "$file" ] && continue
+              FILE_SIZE=$(stat -c%s "$file" 2>/dev/null || echo 0)
+              FILE_SIZE_MB=$((FILE_SIZE / 1048576))
+              if [ $((CURRENT_BATCH_SIZE + FILE_SIZE_MB)) -gt $BATCH_SIZE_MB ] && [ -s /dev/shm/batch_files.txt ]; then
+                echo "Pushing batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
+                cat /dev/shm/batch_files.txt | xargs -d '\n' git add --sparse
+                git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
+                git pull --rebase origin ${{ github.ref_name }} || git pull origin ${{ github.ref_name }}
+                if [ $CURRENT_BATCH_SIZE -gt 900 ]; then
+                  sleep $((2 + RANDOM % 4))
+                fi
+                git push
+                BATCH_NUM=$((BATCH_NUM + 1)); CURRENT_BATCH_SIZE=0; > /dev/shm/batch_files.txt
+              fi
+              echo "$file" >> /dev/shm/batch_files.txt
+              CURRENT_BATCH_SIZE=$((CURRENT_BATCH_SIZE + FILE_SIZE_MB))
+            done <<< "$ALL_FILES"
+            if [ -s /dev/shm/batch_files.txt ]; then
+              echo "Pushing final batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
+              cat /dev/shm/batch_files.txt | xargs -d '\n' git add --sparse
+              git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
+              git pull --rebase origin ${{ github.ref_name }} || git pull origin ${{ github.ref_name }}
+              if [ $CURRENT_BATCH_SIZE -gt 900 ]; then
+                sleep $((2 + RANDOM % 4))
+              fi
+              git push
+            fi
+            rm -f /dev/shm/batch_files.txt
+          fi
+          
+          git push origin ${{ github.ref_name }}
+          echo "DONE!"
