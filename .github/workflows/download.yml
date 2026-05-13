@@ -283,7 +283,7 @@ jobs:
           
           IS_VIDEO=false
           if [ "$IS_TORRENT" = false ]; then
-            if yt-dlp --get-url "$TORRENT_URL" &>/dev/null; then
+            if yt-dlp --no-warnings --get-url "$TORRENT_URL" &>/dev/null; then
               IS_VIDEO=true
               echo "yt-dlp supported site detected"
             fi
@@ -374,8 +374,19 @@ jobs:
             esac
             
             yt-dlp $COOKIE_ARG $EXTRACTOR_ARG $FORMAT_ARG $SUB_FLAG $PLAYLIST_FLAG \
+                   --no-abort-on-error \
+                   --restrict-filenames \
                    -o "${DOWNLOAD_DIR}/%(title)s.%(ext)s" \
-                   "$TORRENT_URL"
+                   "$TORRENT_URL" || {
+              echo "yt-dlp failed, falling back to aria2..."
+              aria2c --max-connection-per-server=16 \
+                     --split=16 \
+                     --dir="$DOWNLOAD_DIR" \
+                     --out="${CLEAN_NAME}" \
+                     --continue=true \
+                     --file-allocation=falloc \
+                     "$TORRENT_URL"
+            }
           else
             aria2c --max-connection-per-server=16 \
                    --split=16 \
@@ -388,7 +399,6 @@ jobs:
           
           echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
           echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
-
       - name: Zip entire folder
         if: github.event.inputs.mode == 'Torrent - Zip Entire Folder'
         run: |
