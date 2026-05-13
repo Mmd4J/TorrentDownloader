@@ -108,77 +108,16 @@ jobs:
           if [ "$MODE" != "Upload as Artifact" ]; then
             date +%s > "$TIMESTAMP_FILE"
           fi
-          
-      - name: Setup YouTube API script
-        run: |
-          echo 'import os' > /tmp/yt_api.py
-          echo 'import sys' >> /tmp/yt_api.py
-          echo 'import time' >> /tmp/yt_api.py
-          echo 'import requests' >> /tmp/yt_api.py
-          echo 'import re' >> /tmp/yt_api.py
-          echo '' >> /tmp/yt_api.py
-          echo 'url = sys.argv[1]' >> /tmp/yt_api.py
-          echo 'quality_input = sys.argv[2]' >> /tmp/yt_api.py
-          echo 'outdir = sys.argv[3]' >> /tmp/yt_api.py
-          echo '' >> /tmp/yt_api.py
-          echo "API = 'https://hub.ytconvert.org/api/download'" >> /tmp/yt_api.py
-          echo 'HEADERS = {' >> /tmp/yt_api.py
-          echo "    'User-Agent': 'Mozilla/5.0'," >> /tmp/yt_api.py
-          echo "    'Accept': 'application/json'," >> /tmp/yt_api.py
-          echo "    'Referer': 'https://media.ytmp3.gg/'," >> /tmp/yt_api.py
-          echo "    'Origin': 'https://media.ytmp3.gg'" >> /tmp/yt_api.py
-          echo '}' >> /tmp/yt_api.py
-          echo '' >> /tmp/yt_api.py
-          echo 'if "Audio" in quality_input:' >> /tmp/yt_api.py
-          echo "    payload = {'url': url, 'os': 'linux', 'output': {'type': 'audio', 'format': 'mp3'}, 'audio': {'bitrate': '320k'}}" >> /tmp/yt_api.py
-          echo "    ext = 'mp3'" >> /tmp/yt_api.py
-          echo 'elif "1080" in quality_input:' >> /tmp/yt_api.py
-          echo "    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '1080p'}}" >> /tmp/yt_api.py
-          echo "    ext = 'mp4'" >> /tmp/yt_api.py
-          echo 'elif "720" in quality_input:' >> /tmp/yt_api.py
-          echo "    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '720p'}}" >> /tmp/yt_api.py
-          echo "    ext = 'mp4'" >> /tmp/yt_api.py
-          echo 'elif "480" in quality_input:' >> /tmp/yt_api.py
-          echo "    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '480p'}}" >> /tmp/yt_api.py
-          echo "    ext = 'mp4'" >> /tmp/yt_api.py
-          echo 'else:' >> /tmp/yt_api.py
-          echo "    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '720p'}}" >> /tmp/yt_api.py
-          echo "    ext = 'mp4'" >> /tmp/yt_api.py
-          echo '' >> /tmp/yt_api.py
-          echo 'try:' >> /tmp/yt_api.py
-          echo '    resp = requests.post(API, json=payload, headers=HEADERS, timeout=15)' >> /tmp/yt_api.py
-          echo '    if resp.status_code != 200:' >> /tmp/yt_api.py
-          echo '        print(f"API returned {resp.status_code}")' >> /tmp/yt_api.py
-          echo '        sys.exit(1)' >> /tmp/yt_api.py
-          echo '    status_url = resp.json().get("statusUrl")' >> /tmp/yt_api.py
-          echo '    if not status_url:' >> /tmp/yt_api.py
-          echo '        print("No status URL")' >> /tmp/yt_api.py
-          echo '        sys.exit(1)' >> /tmp/yt_api.py
-          echo '    for _ in range(60):' >> /tmp/yt_api.py
-          echo '        time.sleep(2)' >> /tmp/yt_api.py
-          echo '        s_resp = requests.get(status_url, headers=HEADERS, timeout=10)' >> /tmp/yt_api.py
-          echo '        if s_resp.status_code == 200:' >> /tmp/yt_api.py
-          echo '            data = s_resp.json()' >> /tmp/yt_api.py
-          echo '            if data.get("status") == "completed":' >> /tmp/yt_api.py
-          echo '                dl_url = data.get("downloadUrl")' >> /tmp/yt_api.py
-          echo '                raw_title = data.get("title", "YouTube_Video")' >> /tmp/yt_api.py
-          echo '                title = re.sub(r'"'"'[\\\\/*?:"<>| ]'"'"', '"'"'_'"'"', raw_title)' >> /tmp/yt_api.py
-          echo '                if dl_url:' >> /tmp/yt_api.py
-          echo '                    filepath = os.path.join(outdir, f"{title}.{ext}")' >> /tmp/yt_api.py
-          echo '                    dl_req = requests.get(dl_url, stream=True, timeout=60)' >> /tmp/yt_api.py
-          echo '                    with open(filepath, "wb") as f:' >> /tmp/yt_api.py
-          echo '                        for chunk in dl_req.iter_content(8192):' >> /tmp/yt_api.py
-          echo '                            if chunk: f.write(chunk)' >> /tmp/yt_api.py
-          echo '                    print(f"DOWNLOADED:{filepath}")' >> /tmp/yt_api.py
-          echo '                    sys.exit(0)' >> /tmp/yt_api.py
-          echo '            elif data.get("status") in ("failed", "error"):' >> /tmp/yt_api.py
-          echo '                print("API conversion failed")' >> /tmp/yt_api.py
-          echo '                sys.exit(1)' >> /tmp/yt_api.py
-          echo '    print("API timed out")' >> /tmp/yt_api.py
-          echo '    sys.exit(1)' >> /tmp/yt_api.py
-          echo 'except Exception as e:' >> /tmp/yt_api.py
-          echo '    print(f"API error: {e}")' >> /tmp/yt_api.py
-          echo '    sys.exit(1)' >> /tmp/yt_api.py
+
+      - name: Cache and setup media tools (yt-dlp + ffmpeg static builds)
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/bin/yt-dlp
+            /usr/local/bin/ffmpeg
+            /usr/local/bin/ffprobe
+          key: media-tools-static-v1
+
       - name: Check existing downloads via manifest
         if: github.event.inputs.mode != 'Upload as Artifact'
         id: check_existing
@@ -340,11 +279,12 @@ jobs:
             done
             [ ${#ARIA2_INDEXES[@]} -gt 0 ] && echo "select_option=--select-file=$(IFS=','; echo "${ARIA2_INDEXES[*]}")" >> $GITHUB_OUTPUT
           fi
-
-      - name: Install media tools if needed
+                - name: Install media tools if needed
         run: |
           TORRENT_URL="${{ github.event.inputs.url }}"
           FAST_API="${{ github.event.inputs.fast_api }}"
+          TIMESTAMP_FILE=".github/.last_media_update"
+          MODE="${{ github.event.inputs.mode }}"
           
           if [[ "$TORRENT_URL" == magnet:* ]] || echo "$TORRENT_URL" | grep -qE '\.torrent(\?.*)?$'; then
             echo "Torrent detected, no media tools needed."
@@ -353,7 +293,7 @@ jobs:
           
           if echo "$TORRENT_URL" | grep -qE "(youtube|youtu\.be)"; then
             if [ "$FAST_API" = "true" ]; then
-              echo "YouTube + Fast API mode. No heavy tools needed."
+              echo "YouTube + Fast API mode. No media tools needed."
               exit 0
             fi
           elif ! echo "$TORRENT_URL" | grep -qE "(youtube|youtu\.be|vimeo\.com|tiktok\.com|twitch\.tv|dailymotion\.com|bilibili\.com|soundcloud\.com|spotify\.com|bandcamp\.com|mixcloud\.com|audiomack\.com|deezer\.com|tidal\.com)"; then
@@ -361,13 +301,105 @@ jobs:
             exit 0
           fi
           
-          echo "Media tools needed. Installing yt-dlp and ffmpeg..."
-          if ! command -v yt-dlp &> /dev/null || ! command -v ffprobe &> /dev/null; then
-            sudo apt-get update -qq
-            sudo apt-get install -y yt-dlp ffmpeg
-          else
-            echo "Media tools already installed."
+          if command -v yt-dlp &> /dev/null && command -v ffprobe &> /dev/null; then
+            if [ -f "$TIMESTAMP_FILE" ] && [ "$MODE" != "Upload as Artifact" ]; then
+              LAST_UPDATE=$(cat "$TIMESTAMP_FILE")
+              NOW=$(date +%s)
+              DAYS_OLD=$(( (NOW - LAST_UPDATE) / 86400 ))
+              if [ $DAYS_OLD -le 7 ]; then
+                echo "Media tools present and updated $DAYS_OLD days ago. Skipping."
+                exit 0
+              else
+                echo "Media tools outdated ($DAYS_OLD days). Refreshing..."
+              fi
+            fi
           fi
+          
+          echo "Downloading static binaries..."
+          curl -sL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          chmod +x /usr/local/bin/yt-dlp
+          
+          curl -sL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz | tar xJ -C /tmp/
+          cp /tmp/ffmpeg-*-amd64-static/ffmpeg /usr/local/bin/
+          cp /tmp/ffmpeg-*-amd64-static/ffprobe /usr/local/bin/
+          rm -rf /tmp/ffmpeg-*-amd64-static
+          
+          if [ "$MODE" != "Upload as Artifact" ]; then
+            date +%s > "$TIMESTAMP_FILE"
+          fi
+          
+          echo "Media tools installed (static builds)."
+
+      - name: Setup YouTube API script
+        run: |
+          echo 'import os' > /tmp/yt_api.py
+          echo 'import sys' >> /tmp/yt_api.py
+          echo 'import time' >> /tmp/yt_api.py
+          echo 'import requests' >> /tmp/yt_api.py
+          echo 'import re' >> /tmp/yt_api.py
+          echo '' >> /tmp/yt_api.py
+          echo 'url = sys.argv[1]' >> /tmp/yt_api.py
+          echo 'quality_input = sys.argv[2]' >> /tmp/yt_api.py
+          echo 'outdir = sys.argv[3]' >> /tmp/yt_api.py
+          echo '' >> /tmp/yt_api.py
+          echo "API = 'https://hub.ytconvert.org/api/download'" >> /tmp/yt_api.py
+          echo 'HEADERS = {' >> /tmp/yt_api.py
+          echo "    'User-Agent': 'Mozilla/5.0'," >> /tmp/yt_api.py
+          echo "    'Accept': 'application/json'," >> /tmp/yt_api.py
+          echo "    'Referer': 'https://media.ytmp3.gg/'," >> /tmp/yt_api.py
+          echo "    'Origin': 'https://media.ytmp3.gg'" >> /tmp/yt_api.py
+          echo '}' >> /tmp/yt_api.py
+          echo '' >> /tmp/yt_api.py
+          echo 'if "Audio" in quality_input:' >> /tmp/yt_api.py
+          echo "    payload = {'url': url, 'os': 'linux', 'output': {'type': 'audio', 'format': 'mp3'}, 'audio': {'bitrate': '320k'}}" >> /tmp/yt_api.py
+          echo "    ext = 'mp3'" >> /tmp/yt_api.py
+          echo 'elif "1080" in quality_input:' >> /tmp/yt_api.py
+          echo "    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '1080p'}}" >> /tmp/yt_api.py
+          echo "    ext = 'mp4'" >> /tmp/yt_api.py
+          echo 'elif "720" in quality_input:' >> /tmp/yt_api.py
+          echo "    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '720p'}}" >> /tmp/yt_api.py
+          echo "    ext = 'mp4'" >> /tmp/yt_api.py
+          echo 'elif "480" in quality_input:' >> /tmp/yt_api.py
+          echo "    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '480p'}}" >> /tmp/yt_api.py
+          echo "    ext = 'mp4'" >> /tmp/yt_api.py
+          echo 'else:' >> /tmp/yt_api.py
+          echo "    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '720p'}}" >> /tmp/yt_api.py
+          echo "    ext = 'mp4'" >> /tmp/yt_api.py
+          echo '' >> /tmp/yt_api.py
+          echo 'try:' >> /tmp/yt_api.py
+          echo '    resp = requests.post(API, json=payload, headers=HEADERS, timeout=15)' >> /tmp/yt_api.py
+          echo '    if resp.status_code != 200:' >> /tmp/yt_api.py
+          echo '        print(f"API returned {resp.status_code}")' >> /tmp/yt_api.py
+          echo '        sys.exit(1)' >> /tmp/yt_api.py
+          echo '    status_url = resp.json().get("statusUrl")' >> /tmp/yt_api.py
+          echo '    if not status_url:' >> /tmp/yt_api.py
+          echo '        print("No status URL")' >> /tmp/yt_api.py
+          echo '        sys.exit(1)' >> /tmp/yt_api.py
+          echo '    for _ in range(60):' >> /tmp/yt_api.py
+          echo '        time.sleep(2)' >> /tmp/yt_api.py
+          echo '        s_resp = requests.get(status_url, headers=HEADERS, timeout=10)' >> /tmp/yt_api.py
+          echo '        if s_resp.status_code == 200:' >> /tmp/yt_api.py
+          echo '            data = s_resp.json()' >> /tmp/yt_api.py
+          echo '            if data.get("status") == "completed":' >> /tmp/yt_api.py
+          echo '                dl_url = data.get("downloadUrl")' >> /tmp/yt_api.py
+          echo '                raw_title = data.get("title", "YouTube_Video")' >> /tmp/yt_api.py
+          echo '                title = re.sub(r'"'"'[\\\\/*?:\"<>| ]'"'"', '"'"'_'"'"', raw_title)' >> /tmp/yt_api.py
+          echo '                if dl_url:' >> /tmp/yt_api.py
+          echo '                    filepath = os.path.join(outdir, f"{title}.{ext}")' >> /tmp/yt_api.py
+          echo '                    dl_req = requests.get(dl_url, stream=True, timeout=60)' >> /tmp/yt_api.py
+          echo '                    with open(filepath, "wb") as f:' >> /tmp/yt_api.py
+          echo '                        for chunk in dl_req.iter_content(8192):' >> /tmp/yt_api.py
+          echo '                            if chunk: f.write(chunk)' >> /tmp/yt_api.py
+          echo '                    print(f"DOWNLOADED:{filepath}")' >> /tmp/yt_api.py
+          echo '                    sys.exit(0)' >> /tmp/yt_api.py
+          echo '            elif data.get("status") in ("failed", "error"):' >> /tmp/yt_api.py
+          echo '                print("API conversion failed")' >> /tmp/yt_api.py
+          echo '                sys.exit(1)' >> /tmp/yt_api.py
+          echo '    print("API timed out")' >> /tmp/yt_api.py
+          echo '    sys.exit(1)' >> /tmp/yt_api.py
+          echo 'except Exception as e:' >> /tmp/yt_api.py
+          echo '    print(f"API error: {e}")' >> /tmp/yt_api.py
+          echo '    sys.exit(1)' >> /tmp/yt_api.py
 
       - name: Download files
         if: github.event.inputs.mode != 'Show Info Only'
@@ -444,12 +476,9 @@ jobs:
               echo "Fast API success!"
             else
               COOKIE_ARG=""
-              EXTRACTOR_ARG=""
               if [ -n "${{ secrets.YOUTUBE_COOKIES }}" ]; then
                 echo "${{ secrets.YOUTUBE_COOKIES }}" > /tmp/cookies.txt
                 COOKIE_ARG="--cookies /tmp/cookies.txt"
-              else
-                EXTRACTOR_ARG='--extractor-args youtube:player_client=android,ios,web'
               fi
               
               PLAYLIST_FLAG="--no-playlist"
@@ -491,7 +520,7 @@ jobs:
                   ;;
               esac
               
-              yt-dlp $COOKIE_ARG $EXTRACTOR_ARG $FORMAT_ARG $SUB_FLAG $PLAYLIST_FLAG \
+              yt-dlp $COOKIE_ARG $FORMAT_ARG $SUB_FLAG $PLAYLIST_FLAG \
                      --no-abort-on-error \
                      --restrict-filenames \
                      -o "${DOWNLOAD_DIR}/%(title)s.%(ext)s" \
@@ -500,12 +529,9 @@ jobs:
             
           elif [ "$IS_VIDEO" = true ]; then
             COOKIE_ARG=""
-            EXTRACTOR_ARG=""
             if [ -n "${{ secrets.YOUTUBE_COOKIES }}" ]; then
               echo "${{ secrets.YOUTUBE_COOKIES }}" > /tmp/cookies.txt
               COOKIE_ARG="--cookies /tmp/cookies.txt"
-            else
-              EXTRACTOR_ARG='--extractor-args youtube:player_client=android,ios,web'
             fi
             
             PLAYLIST_FLAG="--no-playlist"
@@ -547,7 +573,7 @@ jobs:
                 ;;
             esac
             
-            yt-dlp $COOKIE_ARG $EXTRACTOR_ARG $FORMAT_ARG $SUB_FLAG $PLAYLIST_FLAG \
+            yt-dlp $COOKIE_ARG $FORMAT_ARG $SUB_FLAG $PLAYLIST_FLAG \
                    --no-abort-on-error \
                    --restrict-filenames \
                    -o "${DOWNLOAD_DIR}/%(title)s.%(ext)s" \
@@ -565,7 +591,7 @@ jobs:
           
           echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
           echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
-      - name: Zip entire folder
+                - name: Zip entire folder
         if: github.event.inputs.mode == 'Torrent - Zip Entire Folder'
         run: |
           cd "${{ steps.download.outputs.download_dir }}"
