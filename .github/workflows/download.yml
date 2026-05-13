@@ -79,7 +79,7 @@ jobs:
       - name: Install dependencies (updates every 7 days)
         run: |
           TIMESTAMP_FILE=".github/.last_apt_update"
-          if command -v aria2c &> /dev/null && command -v 7z &> /dev/null && command -v jq &> /dev/null && command -v yt-dlp &> /dev/null && command -v ffmpeg &> /dev/null; then
+          if command -v aria2c &> /dev/null && command -v 7z &> /dev/null && command -v jq &> /dev/null && command -v yt-dlp &> /dev/null && command -v ffprobe &> /dev/null; then
             TOOLS_EXIST=true
           else
             TOOLS_EXIST=false
@@ -104,7 +104,6 @@ jobs:
           else
             echo "All tools present and up-to-date (updated $DAYS_OLD days ago). Skipping."
           fi
-
       - name: Check existing downloads via manifest
         if: github.event.inputs.mode != 'Upload as Artifact'
         id: check_existing
@@ -283,12 +282,9 @@ jobs:
           
           IS_VIDEO=false
           if [ "$IS_TORRENT" = false ]; then
-            if echo "$TORRENT_URL" | grep -qE "(youtube\.com|youtu\.be|vimeo\.com|tiktok\.com|twitch\.tv|dailymotion\.com|bilibili\.com|soundcloud\.com|spotify\.com|bandcamp\.com|mixcloud\.com|audiomack\.com|deezer\.com|tidal\.com)"; then
+            if echo "$TORRENT_URL" | grep -qE "(youtube|youtu\.be|vimeo\.com|tiktok\.com|twitch\.tv|dailymotion\.com|bilibili\.com|soundcloud\.com|spotify\.com|bandcamp\.com|mixcloud\.com|audiomack\.com|deezer\.com|tidal\.com)"; then
               IS_VIDEO=true
-              echo "Media site detected by URL pattern"
-            elif yt-dlp --no-warnings --get-url "$TORRENT_URL" >/dev/null 2>&1; then
-              IS_VIDEO=true
-              echo "yt-dlp supported site detected"
+              echo "Media site detected"
             fi
           fi
           
@@ -402,28 +398,6 @@ jobs:
           
           echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
           echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
-      - name: Split large files
-        if: github.event.inputs.mode != 'Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
-        run: |
-          DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
-          SPLIT_SIZE=$((95 * 1048576))
-          echo "Checking for files larger than 95MB..."
-          find "$DOWNLOAD_DIR" -type f ! -name "*.7z.*" -print0 | while IFS= read -r -d '' file; do
-            FILE_SIZE=$(stat -c%s "$file" 2>/dev/null)
-            BASENAME=$(basename "$file")
-            DIRNAME=$(dirname "$file")
-            EXISTING_PARTS=$(find "$DIRNAME" -maxdepth 1 -name "${BASENAME}.7z.*" 2>/dev/null | head -1)
-            if [ -n "$EXISTING_PARTS" ]; then
-              echo "Already split: $BASENAME"
-              continue
-            fi
-            if [ "$FILE_SIZE" -gt "$SPLIT_SIZE" ]; then
-              echo "Splitting: $BASENAME"
-              7z a -v95m -mx0 -mmt=on "${DIRNAME}/${BASENAME}.7z" "$file" && rm "$file"
-            fi
-          done
-          echo "Done."
-
       - name: Upload as artifact
         if: github.event.inputs.mode == 'Upload as Artifact'
         uses: actions/upload-artifact@v4
