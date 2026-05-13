@@ -86,7 +86,7 @@ jobs:
           TIMESTAMP_FILE=".github/.last_apt_update"
           MODE="${{ github.event.inputs.mode }}"
           
-          if command -v aria2c &> /dev/null && command -v 7z &> /dev/null && command -v jq &> /dev/null && command -v yt-dlp &> /dev/null; then
+          if command -v aria2c &> /dev/null && command -v 7z &> /dev/null && command -v jq &> /dev/null; then
             if [ -f "$TIMESTAMP_FILE" ] && [ "$MODE" != "Upload as Artifact" ]; then
               LAST_UPDATE=$(cat "$TIMESTAMP_FILE")
               NOW=$(date +%s)
@@ -103,7 +103,7 @@ jobs:
           fi
           
           sudo apt-get update -qq
-          sudo apt-get install -y aria2 p7zip-full p7zip-rar curl jq python3 python3-requests yt-dlp ffmpeg
+          sudo apt-get install -y aria2 p7zip-full p7zip-rar curl jq python3 python3-requests
           
           if [ "$MODE" != "Upload as Artifact" ]; then
             date +%s > "$TIMESTAMP_FILE"
@@ -341,6 +341,34 @@ jobs:
             [ ${#ARIA2_INDEXES[@]} -gt 0 ] && echo "select_option=--select-file=$(IFS=','; echo "${ARIA2_INDEXES[*]}")" >> $GITHUB_OUTPUT
           fi
 
+      - name: Install media tools if needed
+        run: |
+          TORRENT_URL="${{ github.event.inputs.url }}"
+          FAST_API="${{ github.event.inputs.fast_api }}"
+          
+          if [[ "$TORRENT_URL" == magnet:* ]] || echo "$TORRENT_URL" | grep -qE '\.torrent(\?.*)?$'; then
+            echo "Torrent detected, no media tools needed."
+            exit 0
+          fi
+          
+          if echo "$TORRENT_URL" | grep -qE "(youtube|youtu\.be)"; then
+            if [ "$FAST_API" = "true" ]; then
+              echo "YouTube + Fast API mode. No heavy tools needed."
+              exit 0
+            fi
+          elif ! echo "$TORRENT_URL" | grep -qE "(youtube|youtu\.be|vimeo\.com|tiktok\.com|twitch\.tv|dailymotion\.com|bilibili\.com|soundcloud\.com|spotify\.com|bandcamp\.com|mixcloud\.com|audiomack\.com|deezer\.com|tidal\.com)"; then
+            echo "Direct URL detected. No media tools needed."
+            exit 0
+          fi
+          
+          echo "Media tools needed. Installing yt-dlp and ffmpeg..."
+          if ! command -v yt-dlp &> /dev/null || ! command -v ffprobe &> /dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y yt-dlp ffmpeg
+          else
+            echo "Media tools already installed."
+          fi
+
       - name: Download files
         if: github.event.inputs.mode != 'Show Info Only'
         id: download
@@ -360,7 +388,6 @@ jobs:
           if [ "$IS_TORRENT" = false ]; then
             if echo "$TORRENT_URL" | grep -qE "(youtube|youtu\.be)"; then
               IS_YOUTUBE=true
-              IS_VIDEO=true
               echo "YouTube detected"
             elif echo "$TORRENT_URL" | grep -qE "(vimeo\.com|tiktok\.com|twitch\.tv|dailymotion\.com|bilibili\.com|soundcloud\.com|spotify\.com|bandcamp\.com|mixcloud\.com|audiomack\.com|deezer\.com|tidal\.com)"; then
               IS_VIDEO=true
@@ -404,22 +431,74 @@ jobs:
                    "$ARIA2_INPUT"
             rm -f "${DOWNLOAD_DIR}/torrent.torrent"
             
-          elif [ "$IS_YOUTUBE" = true ] && [ "${{ github.event.inputs.fast_api }}" = "true" ]; then
-            echo "Trying fast API for YouTube..."
-            QUALITY="${{ github.event.inputs.video_quality }}"
-            
-            API_OUTPUT=$(python3 /tmp/yt_api.py "$TORRENT_URL" "$QUALITY" "$DOWNLOAD_DIR" 2>&1)
-            echo "$API_OUTPUT"
-            
-            if echo "$API_OUTPUT" | grep -q "DOWNLOADED:"; then
+          elif [ "$IS_YOUTUBE" = true ]; then
+            if [ "${{ github.event.inputs.fast_api }}" = "true" ]; then
+              echo "Trying fast API for YouTube..."
+              QUALITY="${{ github.event.inputs.video_quality }}"
+              API_OUTPUT=$(python3 /tmp/yt_api.py "$TORRENT_URL" "$QUALITY" "$DOWNLOAD_DIR" 2>&1)
+              echo "$API_OUTPUT"
+              if ! echo "$API_OUTPUT" | grep -q "DOWNLOADED:"; then
+                echo "Fast API failed!"
+                exit 1
+              fi
               echo "Fast API success!"
             else
-              echo "Fast API failed, falling back to yt-dlp..."
-              IS_YOUTUBE=false
+              COOKIE_ARG=""
+              EXTRACTOR_ARG=""
+              if [ -n "${{ secrets.YOUTUBE_COOKIES }}" ]; then
+                echo "${{ secrets.YOUTUBE_COOKIES }}" > /tmp/cookies.txt
+                COOKIE_ARG="--cookies /tmp/cookies.txt"
+              else
+                EXTRACTOR_ARG='--extractor-args youtube:player_client=android,ios,web'
+              fi
+              
+              PLAYLIST_FLAG="--no-playlist"
+              if [ "${{ github.event.inputs.playlist }}" = "true" ]; then
+                PLAYLIST_FLAG="--yes-playlist"
+              fi
+              
+              QUALITY="${{ github.event.inputs.video_quality }}"
+              SUB_FLAG=""
+              
+              if [ "${{ github.event.inputs.subtitles }}" = "true" ]; then
+                SUB_FLAG="--write-subs --embed-subs --sub-lang en"
+                if [ "${{ github.event.inputs.auto_subs }}" = "true" ]; then
+                  SUB_FLAG="$SUB_FLAG --write-auto-subs"
+                fi
+              fi
+              
+              case "$QUALITY" in
+                "Best quality")
+                  FORMAT_ARG="-f bestvideo+bestaudio/best --merge-output-format mp4"
+                  ;;
+                "1080p")
+                  FORMAT_ARG="-f 'bestvideo[height<=1080]+bestaudio/best[height<=1080]' --merge-output-format mp4"
+                  ;;
+                "720p")
+                  FORMAT_ARG="-f 'bestvideo[height<=720]+bestaudio/best[height<=720]' --merge-output-format mp4"
+                  ;;
+                "480p")
+                  FORMAT_ARG="-f 'bestvideo[height<=480]+bestaudio/best[height<=480]' --merge-output-format mp4"
+                  ;;
+                "Audio only")
+                  FORMAT_ARG="-x --audio-format mp3"
+                  ;;
+                "Subtitles only")
+                  FORMAT_ARG="--skip-download --write-subs --sub-lang en"
+                  if [ "${{ github.event.inputs.auto_subs }}" = "true" ]; then
+                    FORMAT_ARG="$FORMAT_ARG --write-auto-subs"
+                  fi
+                  ;;
+              esac
+              
+              yt-dlp $COOKIE_ARG $EXTRACTOR_ARG $FORMAT_ARG $SUB_FLAG $PLAYLIST_FLAG \
+                     --no-abort-on-error \
+                     --restrict-filenames \
+                     -o "${DOWNLOAD_DIR}/%(title)s.%(ext)s" \
+                     "$TORRENT_URL"
             fi
-          fi
-          
-          if [ "$IS_VIDEO" = true ] && [ "$IS_YOUTUBE" = false ]; then
+            
+          elif [ "$IS_VIDEO" = true ]; then
             COOKIE_ARG=""
             EXTRACTOR_ARG=""
             if [ -n "${{ secrets.YOUTUBE_COOKIES }}" ]; then
@@ -486,7 +565,6 @@ jobs:
           
           echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
           echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
-
       - name: Zip entire folder
         if: github.event.inputs.mode == 'Torrent - Zip Entire Folder'
         run: |
