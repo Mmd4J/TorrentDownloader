@@ -104,7 +104,7 @@ jobs:
           if [ "$TOOLS_EXIST" = false ] || [ "$SHOULD_UPDATE" = true ]; then
             echo "Installing dependencies..."
             sudo apt-get update -qq
-            sudo apt-get install -y aria2 p7zip-full p7zip-rar curl jq python3 yt-dlp ffmpeg
+            sudo apt-get install -y aria2 p7zip-full p7zip-rar curl jq python3 python3-requests yt-dlp ffmpeg
             date +%s > "$TIMESTAMP_FILE"
           else
             echo "All tools present and up-to-date (updated $DAYS_OLD days ago). Skipping."
@@ -339,82 +339,6 @@ jobs:
             echo "Trying fast API for YouTube..."
             QUALITY="${{ github.event.inputs.video_quality }}"
             
-            pip3 install requests --break-system-packages 2>/dev/null || pip3 install requests 2>/dev/null
-            
-            cat > /tmp/yt_api.py << 'PYEOF'
-import os
-import sys
-import time
-import requests
-import re
-
-url = sys.argv[1]
-quality_input = sys.argv[2]
-outdir = sys.argv[3]
-
-API = 'https://hub.ytconvert.org/api/download'
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0',
-    'Accept': 'application/json',
-    'Referer': 'https://media.ytmp3.gg/',
-    'Origin': 'https://media.ytmp3.gg'
-}
-
-if "Audio" in quality_input:
-    payload = {'url': url, 'os': 'linux', 'output': {'type': 'audio', 'format': 'mp3'}, 'audio': {'bitrate': '320k'}}
-    ext = 'mp3'
-elif "1080" in quality_input:
-    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '1080p'}}
-    ext = 'mp4'
-elif "720" in quality_input:
-    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '720p'}}
-    ext = 'mp4'
-elif "480" in quality_input:
-    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '480p'}}
-    ext = 'mp4'
-else:
-    payload = {'url': url, 'os': 'linux', 'output': {'type': 'video', 'format': 'mp4', 'quality': '720p'}}
-    ext = 'mp4'
-
-try:
-    resp = requests.post(API, json=payload, headers=HEADERS, timeout=15)
-    if resp.status_code != 200:
-        print(f"API returned {resp.status_code}")
-        sys.exit(1)
-    
-    status_url = resp.json().get('statusUrl')
-    if not status_url:
-        print("No status URL in response")
-        sys.exit(1)
-    
-    for _ in range(60):
-        time.sleep(2)
-        s_resp = requests.get(status_url, headers=HEADERS, timeout=10)
-        if s_resp.status_code == 200:
-            data = s_resp.json()
-            if data.get('status') == 'completed':
-                dl_url = data.get('downloadUrl')
-                raw_title = data.get('title', 'YouTube_Video')
-                title = re.sub(r'[\\/*?:"<>| ]', '_', raw_title)
-                
-                if dl_url:
-                    filepath = os.path.join(outdir, f"{title}.{ext}")
-                    dl_req = requests.get(dl_url, stream=True, timeout=60)
-                    with open(filepath, "wb") as f:
-                        for chunk in dl_req.iter_content(8192):
-                            if chunk: f.write(chunk)
-                    print(f"DOWNLOADED:{filepath}")
-                    sys.exit(0)
-            elif data.get('status') in ('failed', 'error'):
-                print("API conversion failed")
-                sys.exit(1)
-    print("API timed out")
-    sys.exit(1)
-except Exception as e:
-    print(f"API error: {e}")
-    sys.exit(1)
-PYEOF
-            
             API_OUTPUT=$(python3 /tmp/yt_api.py "$TORRENT_URL" "$QUALITY" "$DOWNLOAD_DIR" 2>&1)
             echo "$API_OUTPUT"
             
@@ -492,7 +416,19 @@ PYEOF
           fi
           
           echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
-          echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT      - name: Split large files
+          echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
+
+      - name: Zip entire folder
+        if: github.event.inputs.mode == 'Torrent - Zip Entire Folder'
+        run: |
+          cd "${{ steps.download.outputs.download_dir }}"
+          MAIN_FOLDER=$(find . -maxdepth 1 -type d ! -name '.' | head -n1)
+          if [ -n "$MAIN_FOLDER" ]; then
+            FOLDER_NAME=$(basename "$MAIN_FOLDER")
+            ls "${FOLDER_NAME}.zip".* >/dev/null 2>&1 || 7z a -tzip -mx0 -mmt=on "${FOLDER_NAME}.zip" "$MAIN_FOLDER" && rm -rf "$MAIN_FOLDER"
+          fi
+
+      - name: Split large files
         if: github.event.inputs.mode != 'Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
         run: |
           DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
