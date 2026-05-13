@@ -7,5 +7,7 @@
     {"path": "watch", "size": 1022269, "size_human": "999K", "sha256": "828336e5ed0b5bdc7d3c1d9eb30458d20685b98172595fd8f2c44815daada1cc"}
 ,
     {"path": "watch.1", "size": 1022866, "size_human": "999K", "sha256": "23e2a758f2c31ebe0db3c3206efa59fda8aa6b74fdfa8d35bb4aa648b1813492"}
+,
+    {"path": "watch.2", "size": 1024958, "size_human": "1001K", "sha256": "1ba700d45fce503ef212b2208265bef46041fb258099c643ecea4d2339e8c8b7"}
   ]
 }
