@@ -4,6 +4,28 @@ All times in **Tehran timezone (IR)**.
 
 ## 📥 Download History
 
+> 💾 848MB | 5 downloads
+
+### 📅 2026-05-13 12:19 (Tehran)
+
+**Mode:** Torrent - Zip Entire Folder
+
+**Files:**
+
+
+- 📦 **Mushoku Tensei - Jobless Reincarnation [Seven Seas] [LuCaZ].zip.7z** (Split Archive - 391.2MB total)
+  ├─ 📎 [**Mushoku Tensei - Jobless Reincarnation [Seven Seas] [LuCaZ].zip.7z.001**](https://github.com/KawouT/Torrent/raw/refs/heads/Test/downloads/20260513_084927_Mushoku_Tensei_-_Jobless_Reincarnation__Seven_Seas___LuCaZ_/Mushoku%20Tensei%20-%20Jobless%20Reincarnation%20%5BSeven%20Seas%5D%20%5BLuCaZ%5D.zip.7z.001) - 95M
+  ├─ 📎 [**Mushoku Tensei - Jobless Reincarnation [Seven Seas] [LuCaZ].zip.7z.002**](https://github.com/KawouT/Torrent/raw/refs/heads/Test/downloads/20260513_084927_Mushoku_Tensei_-_Jobless_Reincarnation__Seven_Seas___LuCaZ_/Mushoku%20Tensei%20-%20Jobless%20Reincarnation%20%5BSeven%20Seas%5D%20%5BLuCaZ%5D.zip.7z.002) - 95M
+  ├─ 📎 [**Mushoku Tensei - Jobless Reincarnation [Seven Seas] [LuCaZ].zip.7z.003**](https://github.com/KawouT/Torrent/raw/refs/heads/Test/downloads/20260513_084927_Mushoku_Tensei_-_Jobless_Reincarnation__Seven_Seas___LuCaZ_/Mushoku%20Tensei%20-%20Jobless%20Reincarnation%20%5BSeven%20Seas%5D%20%5BLuCaZ%5D.zip.7z.003) - 95M
+  ├─ 📎 [**Mushoku Tensei - Jobless Reincarnation [Seven Seas] [LuCaZ].zip.7z.004**](https://github.com/KawouT/Torrent/raw/refs/heads/Test/downloads/20260513_084927_Mushoku_Tensei_-_Jobless_Reincarnation__Seven_Seas___LuCaZ_/Mushoku%20Tensei%20-%20Jobless%20Reincarnation%20%5BSeven%20Seas%5D%20%5BLuCaZ%5D.zip.7z.004) - 95M
+  └─ 📎 [**Mushoku Tensei - Jobless Reincarnation [Seven Seas] [LuCaZ].zip.7z.005**](https://github.com/KawouT/Torrent/raw/refs/heads/Test/downloads/20260513_084927_Mushoku_Tensei_-_Jobless_Reincarnation__Seven_Seas___LuCaZ_/Mushoku%20Tensei%20-%20Jobless%20Reincarnation%20%5BSeven%20Seas%5D%20%5BLuCaZ%5D.zip.7z.005) - 12M
+  💡 *Download all parts, then: `7z x Mushoku Tensei - Jobless Reincarnation [Seven Seas] [LuCaZ].zip.7z.001`*
+
+[📋 Download All Links](https://github.com/KawouT/Torrent/raw/refs/heads/Test/history/20260513_084927/links.txt)
+
+---
+
+
 > 💾 457MB | 4 downloads
 
 ### 📅 2026-05-13 12:18 (Tehran)
