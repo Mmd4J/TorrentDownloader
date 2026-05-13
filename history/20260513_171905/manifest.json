@@ -1,0 +1,11 @@
+{
+  "timestamp": "20260513_171905",
+  "url": "https://www.youtube.com/watch?v=S2XooQTsxEM ",
+  "mode": "Torrent - Flat Files",
+  "download_dir": "downloads/20260513_171905_watch",
+  "files": [
+    {"path": "The_Day_the_Dinosaurs_Died.mp4.7z.001", "size": 99614720, "size_human": "95M", "sha256": "d5e5d617cbf90e9f83a7ac3bae2c81d3fb1a7e1839c22b08fab647ec96c16703"}
+,
+    {"path": "The_Day_the_Dinosaurs_Died.mp4.7z.002", "size": 63097695, "size_human": "61M", "sha256": "9f6e2e3efa6e54ba9a054b49e74a65767e294424e37014c8ace091433d8e6014"}
+  ]
+}
