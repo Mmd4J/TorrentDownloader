@@ -721,45 +721,77 @@ jobs:
           fi
           
           DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
+          
+          # Check if there are files to commit
+          if [ ! -d "$DOWNLOAD_DIR" ] || [ -z "$(ls -A "$DOWNLOAD_DIR" 2>/dev/null)" ]; then
+            echo "No files to commit in $DOWNLOAD_DIR"
+            git push origin ${{ github.ref_name }}
+            exit 0
+          fi
+          
           BATCH_SIZE_MB=1000
           echo "Preparing batched commits (${BATCH_SIZE_MB}MB per batch)..."
-          NEW_FILES=$(git ls-files --others --exclude-standard "$DOWNLOAD_DIR" 2>/dev/null)
-          MODIFIED_FILES=$(git diff --name-only "$DOWNLOAD_DIR" 2>/dev/null)
-          ALL_FILES=$(echo -e "$NEW_FILES\n$MODIFIED_FILES" | sort -u | grep -v '^$')
-          if [ -z "$ALL_FILES" ]; then
+          
+          # Get list of files to add
+          git add --sparse --dry-run "$DOWNLOAD_DIR" 2>/dev/null | while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            echo "$file"
+          done > /dev/shm/all_files.txt
+          
+          # Also check untracked files
+          git ls-files --others --exclude-standard "$DOWNLOAD_DIR" 2>/dev/null >> /dev/shm/all_files.txt
+          
+          # Remove duplicates
+          sort -u /dev/shm/all_files.txt > /dev/shm/files_unique.txt
+          mv /dev/shm/files_unique.txt /dev/shm/all_files.txt
+          
+          if [ ! -s /dev/shm/all_files.txt ]; then
             echo "No new files to commit"
           else
-            CURRENT_BATCH_SIZE=0; BATCH_NUM=1; > /dev/shm/batch_files.txt
+            CURRENT_BATCH_SIZE=0
+            BATCH_NUM=1
+            > /dev/shm/batch_files.txt
+            
             while IFS= read -r file; do
               [ -z "$file" ] && continue
-              FILE_SIZE=$(stat -c%s "$file" 2>/dev/null || echo 0)
-              FILE_SIZE_MB=$((FILE_SIZE / 1048576))
+              
+              if [ -f "$file" ]; then
+                FILE_SIZE=$(stat -c%s "$file" 2>/dev/null || echo 0)
+                FILE_SIZE_MB=$((FILE_SIZE / 1048576))
+              else
+                FILE_SIZE_MB=0
+              fi
+              
               if [ $((CURRENT_BATCH_SIZE + FILE_SIZE_MB)) -gt $BATCH_SIZE_MB ] && [ -s /dev/shm/batch_files.txt ]; then
                 echo "Pushing batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
-                cat /dev/shm/batch_files.txt | xargs -d '\n' git add --sparse
-                git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
-                git pull --rebase origin ${{ github.ref_name }} || git pull origin ${{ github.ref_name }}
+                xargs -d '\n' git add --sparse < /dev/shm/batch_files.txt
+                git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" 2>/dev/null || echo "No changes to commit"
+                git pull --rebase origin ${{ github.ref_name }} 2>/dev/null || git pull origin ${{ github.ref_name }} 2>/dev/null || true
                 if [ $CURRENT_BATCH_SIZE -gt 900 ]; then
                   sleep $((2 + RANDOM % 4))
                 fi
-                git push
-                BATCH_NUM=$((BATCH_NUM + 1)); CURRENT_BATCH_SIZE=0; > /dev/shm/batch_files.txt
+                git push 2>/dev/null || true
+                BATCH_NUM=$((BATCH_NUM + 1))
+                CURRENT_BATCH_SIZE=0
+                > /dev/shm/batch_files.txt
               fi
+              
               echo "$file" >> /dev/shm/batch_files.txt
               CURRENT_BATCH_SIZE=$((CURRENT_BATCH_SIZE + FILE_SIZE_MB))
-            done <<< "$ALL_FILES"
+            done < /dev/shm/all_files.txt
+            
             if [ -s /dev/shm/batch_files.txt ]; then
               echo "Pushing final batch $BATCH_NUM (~$CURRENT_BATCH_SIZE MB)"
-              cat /dev/shm/batch_files.txt | xargs -d '\n' git add --sparse
-              git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" || echo "Nothing to commit"
-              git pull --rebase origin ${{ github.ref_name }} || git pull origin ${{ github.ref_name }}
+              xargs -d '\n' git add --sparse < /dev/shm/batch_files.txt
+              git commit -m "Download ${{ steps.download.outputs.timestamp }} (Batch $BATCH_NUM)" 2>/dev/null || echo "No changes to commit"
+              git pull --rebase origin ${{ github.ref_name }} 2>/dev/null || git pull origin ${{ github.ref_name }} 2>/dev/null || true
               if [ $CURRENT_BATCH_SIZE -gt 900 ]; then
                 sleep $((2 + RANDOM % 4))
               fi
-              git push
+              git push 2>/dev/null || true
             fi
-            rm -f /dev/shm/batch_files.txt
+            rm -f /dev/shm/batch_files.txt /dev/shm/all_files.txt
           fi
           
-          git push origin ${{ github.ref_name }}
+          git push origin ${{ github.ref_name }} 2>/dev/null || true
           echo "DONE!"
