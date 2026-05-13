@@ -84,10 +84,10 @@ jobs:
       - name: Install dependencies (updates every 7 days)
         run: |
           TIMESTAMP_FILE=".github/.last_apt_update"
+          MODE="${{ github.event.inputs.mode }}"
           
           if command -v aria2c &> /dev/null && command -v 7z &> /dev/null && command -v jq &> /dev/null && command -v yt-dlp &> /dev/null; then
-            # Tools exist - check if we still skip
-            if [ -f "$TIMESTAMP_FILE" ]; then
+            if [ -f "$TIMESTAMP_FILE" ] && [ "$MODE" != "Upload as Artifact" ]; then
               LAST_UPDATE=$(cat "$TIMESTAMP_FILE")
               NOW=$(date +%s)
               DAYS_OLD=$(( (NOW - LAST_UPDATE) / 86400 ))
@@ -104,7 +104,10 @@ jobs:
           
           sudo apt-get update -qq
           sudo apt-get install -y aria2 p7zip-full p7zip-rar curl jq python3 python3-requests yt-dlp ffmpeg
-          date +%s > "$TIMESTAMP_FILE"
+          
+          if [ "$MODE" != "Upload as Artifact" ]; then
+            date +%s > "$TIMESTAMP_FILE"
+          fi
           
       - name: Setup YouTube API script
         run: |
