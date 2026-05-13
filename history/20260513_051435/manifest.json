@@ -4,6 +4,8 @@
   "mode": "Torrent - Flat Files",
   "download_dir": "downloads/20260513_051435_watch",
   "files": [
+    {"path": "Guess_the_Vocaloid_Song!_(2025_edition).mp3", "size": 41246444, "size_human": "40M", "sha256": "27d493e4b555bf2a6ea5429ed1d9aacdb378a494862369646abe35e882c0fee4"}
+,
     {"path": "Guess_the_Vocaloid_Song!_(2025_edition).mp4.7z.001", "size": 99614720, "size_human": "95M", "sha256": "9ee9e42e72a72f1ad606db3689cc20f611b740fb64056abeb2c237db15b6701e"}
 ,
     {"path": "Guess_the_Vocaloid_Song!_(2025_edition).mp4.7z.002", "size": 43555047, "size_human": "42M", "sha256": "1f9e5d79cd7d95e1d9cebf6cd07571797e1809444304fb9aa1cb813f5182e1fa"}
