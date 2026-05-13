@@ -339,8 +339,14 @@ jobs:
             echo "Trying fast API for YouTube..."
             QUALITY="${{ github.event.inputs.video_quality }}"
             
+            pip3 install requests --break-system-packages 2>/dev/null || pip3 install requests 2>/dev/null
+            
             cat > /tmp/yt_api.py << 'PYEOF'
-import os, sys, time, requests, re
+import os
+import sys
+import time
+import requests
+import re
 
 url = sys.argv[1]
 quality_input = sys.argv[2]
@@ -486,8 +492,7 @@ PYEOF
           fi
           
           echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
-          echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
-      - name: Split large files
+          echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT      - name: Split large files
         if: github.event.inputs.mode != 'Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
         run: |
           DOWNLOAD_DIR="${{ steps.download.outputs.download_dir }}"
