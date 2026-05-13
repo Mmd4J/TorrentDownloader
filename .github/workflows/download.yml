@@ -283,7 +283,10 @@ jobs:
           
           IS_VIDEO=false
           if [ "$IS_TORRENT" = false ]; then
-            if yt-dlp --no-warnings --get-url "$TORRENT_URL" &>/dev/null; then
+            if echo "$TORRENT_URL" | grep -qE "(youtube\.com|youtu\.be|vimeo\.com|tiktok\.com|twitch\.tv|dailymotion\.com|bilibili\.com|soundcloud\.com|spotify\.com|bandcamp\.com|mixcloud\.com|audiomack\.com|deezer\.com|tidal\.com)"; then
+              IS_VIDEO=true
+              echo "Media site detected by URL pattern"
+            elif yt-dlp --no-warnings --get-url "$TORRENT_URL" >/dev/null 2>&1; then
               IS_VIDEO=true
               echo "yt-dlp supported site detected"
             fi
@@ -399,16 +402,6 @@ jobs:
           
           echo "download_dir=${DOWNLOAD_DIR}" >> $GITHUB_OUTPUT
           echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
-      - name: Zip entire folder
-        if: github.event.inputs.mode == 'Torrent - Zip Entire Folder'
-        run: |
-          cd "${{ steps.download.outputs.download_dir }}"
-          MAIN_FOLDER=$(find . -maxdepth 1 -type d ! -name '.' | head -n1)
-          if [ -n "$MAIN_FOLDER" ]; then
-            FOLDER_NAME=$(basename "$MAIN_FOLDER")
-            ls "${FOLDER_NAME}.zip".* >/dev/null 2>&1 || 7z a -tzip -mx0 -mmt=on "${FOLDER_NAME}.zip" "$MAIN_FOLDER" && rm -rf "$MAIN_FOLDER"
-          fi
-
       - name: Split large files
         if: github.event.inputs.mode != 'Show Info Only' && github.event.inputs.mode != 'Upload as Artifact'
         run: |
